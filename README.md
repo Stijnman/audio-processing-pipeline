@@ -237,3 +237,40 @@ ECAPA-TDNN produces 192-dimensional speaker embeddings trained on VoxCeleb — s
 | `HF_TOKEN` | `--diarizer pyannote` |
 | `CELERY_BROKER_URL` | Celery workers (default: `redis://localhost:6379/0`) |
 | `CELERY_RESULT_URL` | Celery result backend (default: `redis://localhost:6379/1`) |
+
+---
+
+## Running on Android (Termux)
+
+The pipeline runs natively on Android via [Termux](https://termux.dev) — no root, no Docker, no PC required.
+
+```bash
+# In Termux:
+pkg install git -y
+git clone https://github.com/Stijnman/audio-processing-pipeline.git
+cd audio-processing-pipeline
+bash termux_install.sh        # installs all dependencies
+bash process.sh call.amr --studio
+```
+
+Process recordings directly from your phone's storage:
+
+```bash
+termux-setup-storage   # grant storage access (run once)
+bash process.sh ~/storage/downloads/call.amr --studio --post-correct
+```
+
+See **[docs/TERMUX.md](docs/TERMUX.md)** for the full guide, including:
+- Accessing recordings from Android storage
+- Recommended Whisper models for Android CPUs
+- Keeping processes running in the background
+- Troubleshooting common issues
+
+---
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Pipeline stages, design decisions, embedding strategy |
+| [docs/TERMUX.md](docs/TERMUX.md) | Android/Termux setup, usage, and troubleshooting |
