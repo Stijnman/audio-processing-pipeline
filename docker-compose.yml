@@ -1,0 +1,140 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Audio Processing Pipeline  —  Docker Compose Stack
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Services:
+#   redis     — Celery message broker
+#   watcher   — Directory watcher (auto-processes files dropped in ./inbox)
+#   worker    — Celery CPU worker (4 concurrent tasks)
+#   worker-gpu— Celery GPU worker (1 concurrent task, optional)
+#   flower    — Celery monitoring web UI (http://localhost:5555)
+#
+# Usage:
+#   # CPU-only stack:
+#   docker compose up -d
+#
+#   # With GPU worker:
+#   docker compose --profile gpu up -d
+#
+#   # Scale CPU workers:
+#   docker compose up -d --scale worker=4
+#
+#   # View logs:
+#   docker compose logs -f watcher
+#   docker compose logs -f worker
+#
+#   # Submit a job manually:
+#   docker compose exec watcher python tasks.py /inbox/call.amr --wait
+#
+# ══════════════════════════════════════════════════════════════════════════════
+
+version: "3.9"
+
+x-pipeline-env: &pipeline-env
+  OPENAI_API_KEY: ${OPENAI_API_KEY}
+  HF_TOKEN:       ${HF_TOKEN:-}
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_URL: redis://redis:6379/1
+
+x-pipeline-volumes: &pipeline-volumes
+  - ./inbox:/inbox
+  - ./output:/output
+  - ./processed:/processed
+  - ./profiles:/profiles
+
+services:
+
+  # ── Redis broker ─────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Directory watcher ─────────────────────────────────────────────────────────
+  watcher:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *pipeline-env
+    volumes: *pipeline-volumes
+    command: >
+      python watcher.py
+        --inbox /inbox
+        --output /output
+        --processed /processed
+        --studio
+        --post-correct
+        --name-speakers
+        --profile-db /profiles/profiles.json
+        --workers 2
+
+  # ── CPU Celery worker ─────────────────────────────────────────────────────────
+  worker:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *pipeline-env
+    volumes: *pipeline-volumes
+    command: >
+      celery -A tasks worker
+        --loglevel=info
+        --concurrency=4
+        --queues=celery
+        --hostname=cpu-worker@%h
+
+  # ── GPU Celery worker (optional) ──────────────────────────────────────────────
+  worker-gpu:
+    build: .
+    restart: unless-stopped
+    profiles: ["gpu"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *pipeline-env
+    volumes: *pipeline-volumes
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: >
+      celery -A tasks worker
+        --loglevel=info
+        --concurrency=1
+        --queues=gpu
+        --hostname=gpu-worker@%h
+
+  # ── Flower monitoring UI ──────────────────────────────────────────────────────
+  flower:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *pipeline-env
+    ports:
+      - "5555:5555"
+    command: >
+      celery -A tasks flower
+        --port=5555
+        --broker=redis://redis:6379/0
+
+volumes:
+  redis_data:

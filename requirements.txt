@@ -1,0 +1,27 @@
+# ── Core pipeline ─────────────────────────────────────────────────────────────
+faster-whisper>=1.0.0        # CTranslate2-optimised Whisper (includes Silero VAD)
+onnxruntime>=1.17.0          # Silero VAD ONNX runtime (CPU)
+# onnxruntime-gpu>=1.17.0    # Uncomment for GPU support
+
+scipy>=1.12.0                # MFCC voice profiling
+numpy>=1.26.0                # Numerical operations
+
+openai>=1.30.0               # LLM post-correction + diarization
+
+# ── Automation ────────────────────────────────────────────────────────────────
+watchdog>=4.0.0              # Efficient file system event monitoring
+celery>=5.3.0                # Distributed task queue
+redis>=5.0.0                 # Redis client (Celery broker)
+flower>=2.0.0                # Celery monitoring web UI (optional)
+
+# ── Optional: PyAnnote neural diarization ─────────────────────────────────────
+# Uncomment to enable --diarizer pyannote
+# Requires HuggingFace token and model license acceptance at:
+#   https://huggingface.co/pyannote/speaker-diarization-3.1
+# pyannote.audio>=3.1.0
+
+# ── Optional: ECAPA-TDNN voice profiling ──────────────────────────────────────
+# Uncomment to enable --ecapa flag
+# speechbrain>=1.0.0
+# torchaudio>=2.2.0
+# torch>=2.2.0               # CPU-only; for GPU: install torch with CUDA index URL
