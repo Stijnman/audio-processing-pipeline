@@ -251,7 +251,7 @@ def main() -> None:
     p.add_argument("--profile-threshold", type=float, default=0.75)
     p.add_argument("--post-correct-model", default="gpt-4o-mini")
 
-    args = argparse.parse_args()
+    args = p.parse_args()
 
     inbox     = Path(args.inbox)
     output    = Path(args.output)
