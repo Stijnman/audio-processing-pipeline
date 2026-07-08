@@ -24,9 +24,8 @@ Features:
 # SECTION 0 — Bootstrap: auto-install missing packages
 # ══════════════════════════════════════════════════════════════════════════════
 
-import sys
-import os
 import subprocess
+import sys
 
 REQUIRED_PACKAGES = {
     "faster_whisper": "faster-whisper",
@@ -95,15 +94,16 @@ except ImportError:
     PYANNOTE_AVAILABLE = False
 
 try:
-    import torch, torchaudio
+    import torch
+    import torchaudio
     from speechbrain.inference.speaker import EncoderClassifier
     ECAPA_AVAILABLE = True
 except ImportError:
     ECAPA_AVAILABLE = False
 
 try:
+    from watchdog.events import FileSystemEventHandler
     from watchdog.observers import Observer
-    from watchdog.events    import FileSystemEventHandler
     WATCHDOG_AVAILABLE = True
 except ImportError:
     WATCHDOG_AVAILABLE = False
@@ -746,8 +746,8 @@ def run_pipeline(args: argparse.Namespace) -> None:
     print(f"  ✓  Pipeline complete in {elapsed:.1f}s")
     print(f"  📁 Output: {out}")
     print(f"  🎵 Clean MP3:   {clean.name}")
-    print(f"  📝 Transcript:  transcript.txt")
-    print(f"  📊 Diarization: diarization.json")
+    print("  📝 Transcript:  transcript.txt")
+    print("  📊 Diarization: diarization.json")
     for spk, p in speaker_files.items():
         print(f"  🎤 {spk}:  {p.name}")
     print("━"*60 + "\n")
@@ -790,7 +790,7 @@ def run_watcher(args: argparse.Namespace) -> None:
     print(f"  👁  Watching: {inbox}")
     print(f"  📁 Output:   {args.output_dir}")
     print(f"  ✅ Done:     {processed}")
-    print(f"  Press Ctrl+C to stop")
+    print("  Press Ctrl+C to stop")
     print(f"{'━'*60}\n")
 
     executor = ThreadPoolExecutor(max_workers=args.workers)

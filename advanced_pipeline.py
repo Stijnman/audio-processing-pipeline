@@ -39,7 +39,6 @@ import argparse
 import difflib
 import json
 import logging
-import os
 import subprocess
 import sys
 import tempfile
@@ -230,7 +229,7 @@ def export_mp3(input_wav: Path, output_mp3: Path, quality: int = 2) -> Path:
     """Export a WAV to MP3 using VBR quality (0=best, 9=worst)."""
     cmd = [
         "ffmpeg", "-y", "-i", str(input_wav),
-        "-codec:a", "libmp3lame", f"-q:a", str(quality),
+        "-codec:a", "libmp3lame", "-q:a", str(quality),
         str(output_mp3),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -1139,7 +1138,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
     log.info("  Clean MP3:      %s", clean_mp3.name)
     log.info("  Transcript:     transcript.txt")
     log.info("  Diarization:    diarization.json")
-    for spk, path in speaker_files.items():
+    for _spk, path in speaker_files.items():
         log.info("  Speaker track:  %s", path.name)
     log.info("=" * 60)
 

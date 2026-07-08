@@ -1,0 +1,16 @@
+# ── Development & testing dependencies ────────────────────────────────────────
+# Install with: pip install -r requirements-dev.txt
+
+# Core runtime (needed for tests to import pipeline modules)
+-r requirements.txt
+
+# Testing
+pytest>=8.0.0
+pytest-timeout>=2.3.0
+
+# Linting
+ruff>=0.4.0
+
+# Type checking
+mypy>=1.10.0
+types-redis>=4.6.0

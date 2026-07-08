@@ -12,6 +12,8 @@ Convert · Clean · Transcribe · Diarize · Split by Speaker — automatically.
 [![Docker](https://img.shields.io/badge/Docker-ready-blue?logo=docker)](Dockerfile)
 [![Android](https://img.shields.io/badge/Android-Termux-brightgreen?logo=android)](docs/TERMUX.md)
 [![Tests](https://img.shields.io/badge/tests-passing-success)](#)
+[![CI](https://github.com/Stijnman/audio-processing-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/Stijnman/audio-processing-pipeline/actions/workflows/ci.yml)
+[![Docker](https://github.com/Stijnman/audio-processing-pipeline/actions/workflows/docker.yml/badge.svg)](https://github.com/Stijnman/audio-processing-pipeline/actions/workflows/docker.yml)
 
 </div>
 

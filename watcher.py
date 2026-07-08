@@ -32,8 +32,8 @@ import shutil
 import subprocess
 import sys
 import time
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -172,8 +172,8 @@ def is_file_stable(path: Path, wait: float = 1.0) -> bool:
 # ══════════════════════════════════════════════════════════════════════════════
 
 try:
+    from watchdog.events import FileSystemEventHandler
     from watchdog.observers import Observer
-    from watchdog.events    import FileSystemEventHandler
     WATCHDOG_AVAILABLE = True
 except ImportError:
     WATCHDOG_AVAILABLE = False

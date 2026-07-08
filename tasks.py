@@ -42,7 +42,6 @@ Environment variables:
   HF_TOKEN            — required for PyAnnote diarization
 """
 
-import logging
 import os
 import subprocess
 import sys

@@ -11,6 +11,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 - Added pytest test suite for `advanced_pipeline.py` utilities and `watcher.py`
 - Added Tests badge to README.md
+- Added GitHub Actions CI workflow (`ci.yml`): lint (ruff), type-check (mypy), pytest on Python 3.9–3.12
+- Added GitHub Actions Docker workflow (`docker.yml`): build smoke-test and `docker-compose config` validation
+- Added `pyproject.toml` with `[tool.ruff]` and `[tool.mypy]` configuration and optional dependency extras
+- Added `requirements-dev.txt` for local development setup
 
 ### Fixed
 - Fixed bug in `advanced_pipeline.py`'s `stitch_chunks` where the overlapping match was excluded instead of deduplicated.
