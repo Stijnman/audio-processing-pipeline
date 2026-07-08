@@ -72,11 +72,11 @@ services:
         --inbox /inbox
         --output /output
         --processed /processed
+        --profile-db /profiles/profiles.json
+        --workers 2
         --studio
         --post-correct
         --name-speakers
-        --profile-db /profiles/profiles.json
-        --workers 2
 
   # ── CPU Celery worker ─────────────────────────────────────────────────────────
   worker:

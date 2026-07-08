@@ -252,7 +252,7 @@ def stitch_chunks(base: list[dict], append: list[dict], overlap_sec: float) -> l
     s2 = [s["text"].strip() for s in append[:n]]
     m  = difflib.SequenceMatcher(None, s1, s2).find_longest_match(0, len(s1), 0, len(s2))
     if m.size > 0:
-        cut1 = len(base) - n + m.a + m.size
+        cut1 = len(base) - len(s1) + m.a + m.size
         cut2 = m.b + m.size
         return base[:cut1] + append[cut2:]
     return base + append

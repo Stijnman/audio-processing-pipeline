@@ -91,7 +91,7 @@ def process_file(audio_path: Path, args: argparse.Namespace) -> bool:
     cmd += ["--compute",           args.compute]
     cmd += ["--diarizer",          args.diarizer]
     cmd += ["--format",            args.format]
-    cmd += ["--profile-db",        str(Path(args.output) / "profiles.json")]
+    cmd += ["--profile-db",        str(args.profile_db)]
     cmd += ["--profile-threshold", str(args.profile_threshold)]
     cmd += ["--post-correct-model", args.post_correct_model]
 
@@ -248,6 +248,8 @@ def main() -> None:
     p.add_argument("--diarizer",         default="llm", choices=["llm", "pyannote"])
     p.add_argument("--hf-token",         default=os.environ.get("HF_TOKEN"))
     p.add_argument("--format",           default="mp3")
+    p.add_argument("--profile-db",         default="profiles.json",
+                   help="Path to voice profile database JSON (forwarded to advanced_pipeline.py)")
     p.add_argument("--profile-threshold", type=float, default=0.75)
     p.add_argument("--post-correct-model", default="gpt-4o-mini")
 

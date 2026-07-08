@@ -104,10 +104,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 # ── Default command: run the directory watcher ────────────────────────────────
 # Override with `docker run ... celery -A tasks worker` for Celery mode.
 CMD ["python", "watcher.py", \
-     "--inbox",     "/inbox", \
-     "--output",    "/output", \
-     "--processed", "/processed", \
+     "--inbox",      "/inbox", \
+     "--output",     "/output", \
+     "--processed",  "/processed", \
+     "--profile-db", "/profiles/profiles.json", \
      "--studio", \
      "--post-correct", \
-     "--name-speakers", \
-     "--profile-db", "/profiles/profiles.json"]
+     "--name-speakers"]
