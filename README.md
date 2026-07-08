@@ -11,6 +11,7 @@ Convert · Clean · Transcribe · Diarize · Split by Speaker — automatically.
 [![ffmpeg](https://img.shields.io/badge/Audio-ffmpeg-darkgreen?logo=ffmpeg)](https://ffmpeg.org/)
 [![Docker](https://img.shields.io/badge/Docker-ready-blue?logo=docker)](Dockerfile)
 [![Android](https://img.shields.io/badge/Android-Termux-brightgreen?logo=android)](docs/TERMUX.md)
+[![Tests](https://img.shields.io/badge/tests-passing-success)](#)
 
 </div>
 

@@ -223,6 +223,10 @@ ffmpeg is a battle-tested, highly optimised C library with native support for ev
 
 Storing raw audio raises significant privacy concerns, especially for phone call recordings. The MFCC/ECAPA embedding approach stores only a compact numerical vector that cannot be used to reconstruct the original audio. The profile database can be shared or backed up without exposing any voice recordings.
 
+### Testing Strategy
+
+The repository includes a pytest suite under `tests/` that focuses on critical pure-function utilities where edge cases are most likely to occur (e.g., `stitch_chunks` overlap deduplication, `merge_intervals` logic, and `watcher.py` file stability checks). End-to-end tests are currently omitted from the automated suite due to the heavy dependencies (ffmpeg, faster-whisper, PyAnnote) and the need for GPU acceleration to run them efficiently in CI.
+
 ### Why LLM diarization instead of a dedicated diarization model?
 
 Dedicated diarization models (pyannote, resemblyzer, ECAPA) require significant compute resources and perform poorly on compressed phone audio (GSM/AMR). The LLM approach leverages the conversational context of the transcript — which is far richer than acoustic features alone — to assign speakers. For two-speaker phone calls, it achieves comparable accuracy to neural models at a fraction of the compute cost.

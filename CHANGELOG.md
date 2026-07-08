@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+- Added pytest test suite for `advanced_pipeline.py` utilities and `watcher.py`
+- Added Tests badge to README.md
+
+### Fixed
+- Fixed bug in `advanced_pipeline.py`'s `stitch_chunks` where the overlapping match was excluded instead of deduplicated.
+- Fixed `watcher.py` CLI parser to correctly parse arguments using `p.parse_args()` instead of the module-level function.
+- Fixed `termux_install.sh` generating `watch.sh` with an invalid `--output` flag (updated to `--output-dir`).
+
+---
+
 ## [2.0.0] — 2026-07-07
 
 ### Added

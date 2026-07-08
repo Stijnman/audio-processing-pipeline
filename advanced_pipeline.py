@@ -276,7 +276,10 @@ def stitch_chunks(base: list[dict], append: list[dict], overlap_sec: float) -> l
 
     if match.size > 0:
         # Splice at the midpoint of the longest identical token run
-        cut1 = len(base) - overlap_words + match.a + match.size
+        # slice1 is base[-overlap_words:]
+        # The match starts at match.a in slice1, which is len(base) - len(slice1) + match.a in base.
+        # We want to include the match from base, so we cut AFTER the match.
+        cut1 = len(base) - len(slice1) + match.a + match.size
         cut2 = match.b + match.size
         return base[:cut1] + append[cut2:]
 
