@@ -119,7 +119,7 @@ echo ""
 
 python AudioPipeline.py watch \
     --inbox "$INBOX" \
-    --output "$OUTPUT" \
+    --output-dir "$OUTPUT" \
     --studio \
     "$@"
 EOF
