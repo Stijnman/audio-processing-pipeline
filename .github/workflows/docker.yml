@@ -1,0 +1,64 @@
+name: Docker
+
+on:
+  push:
+    branches: ["master", "main"]
+  pull_request:
+    branches: ["master", "main"]
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Build smoke-test ─────────────────────────────────────────────────────────
+  build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: audio-processing-pipeline:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test — Python imports
+        run: |
+          docker run --rm audio-processing-pipeline:ci \
+            python -c "
+          import sys, pathlib
+          # Verify core modules are importable
+          sys.path.insert(0, '.')
+          import numpy, scipy
+          print('numpy:', numpy.__version__)
+          print('scipy:', scipy.__version__)
+          print('Smoke test passed.')
+          "
+
+      - name: Smoke-test — CLI help
+        run: |
+          docker run --rm audio-processing-pipeline:ci \
+            python advanced_pipeline.py --help
+
+      - name: Smoke-test — watcher --help
+        run: |
+          docker run --rm audio-processing-pipeline:ci \
+            python watcher.py --help
+
+  # ── Compose validation ───────────────────────────────────────────────────────
+  compose:
+    name: docker-compose config validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml
+        run: docker compose config --quiet
