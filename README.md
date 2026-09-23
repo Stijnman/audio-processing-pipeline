@@ -363,3 +363,7 @@ See [CHANGELOG.md](CHANGELOG.md) for a full history of changes.
 ## License
 
 [MIT](LICENSE) © Stijnman
+
+## Flagship integration
+
+This project remains independently usable and is not deprecated. Its capabilities are also consumed by [VoxForge](https://github.com/Stijnman/VoxForge), where they are integrated with complementary repositories behind shared platform contracts. This repository remains the source of truth for its component-specific implementation.
