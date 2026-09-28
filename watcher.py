@@ -174,16 +174,15 @@ def is_file_stable(path: Path, wait: float = 1.0) -> bool:
 try:
     from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
     from watchdog.observers import Observer
-    FileSystemEventHandler = WatchdogFileSystemEventHandler
     WATCHDOG_AVAILABLE = True
 except ImportError:
     WATCHDOG_AVAILABLE = False
 
-    class FileSystemEventHandler:  # Lightweight fallback when watchdog is optional
+    class WatchdogFileSystemEventHandler:  # Lightweight fallback when watchdog is optional
         pass
 
 
-class AudioFileHandler(FileSystemEventHandler):
+class AudioFileHandler(WatchdogFileSystemEventHandler):
     """Watchdog event handler: triggers pipeline on new audio files."""
 
     def __init__(self, args: argparse.Namespace, executor: ThreadPoolExecutor):
