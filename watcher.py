@@ -178,8 +178,11 @@ try:
 except ImportError:
     WATCHDOG_AVAILABLE = False
 
+    class FileSystemEventHandler:  # Lightweight fallback when watchdog is optional
+        pass
 
-class AudioFileHandler(FileSystemEventHandler if WATCHDOG_AVAILABLE else object):
+
+class AudioFileHandler(FileSystemEventHandler):
     """Watchdog event handler: triggers pipeline on new audio files."""
 
     def __init__(self, args: argparse.Namespace, executor: ThreadPoolExecutor):
