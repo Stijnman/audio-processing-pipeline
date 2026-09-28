@@ -172,8 +172,9 @@ def is_file_stable(path: Path, wait: float = 1.0) -> bool:
 # ══════════════════════════════════════════════════════════════════════════════
 
 try:
-    from watchdog.events import FileSystemEventHandler
+    from watchdog.events import FileSystemEventHandler as WatchdogFileSystemEventHandler
     from watchdog.observers import Observer
+    FileSystemEventHandler = WatchdogFileSystemEventHandler
     WATCHDOG_AVAILABLE = True
 except ImportError:
     WATCHDOG_AVAILABLE = False
