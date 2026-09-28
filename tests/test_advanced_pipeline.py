@@ -1,12 +1,13 @@
-import pytest
-from pathlib import Path
-import sys
 import os
+import sys
+from pathlib import Path
+
+import pytest
 
 # Add parent directory to sys.path to import advanced_pipeline
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from advanced_pipeline import stitch_chunks, merge_intervals
+from advanced_pipeline import merge_intervals, stitch_chunks
 
 
 # ── stitch_chunks ─────────────────────────────────────────────────────────────
