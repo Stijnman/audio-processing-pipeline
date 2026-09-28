@@ -554,6 +554,9 @@ def extract_mfcc_embedding(wav_path: Path, start: float, end: float,
         return np.zeros(n_mfcc)
 
 
+_ECAPA_MODEL: Any = None
+
+
 def extract_ecapa_embedding(wav_path: Path, start: float, end: float) -> np.ndarray:
     """
     Compute a 192-dimensional ECAPA-TDNN speaker embedding.
@@ -565,13 +568,14 @@ def extract_ecapa_embedding(wav_path: Path, start: float, end: float) -> np.ndar
             "SpeechBrain is not installed. Run: pip install speechbrain torchaudio"
         )
     # Lazy-load model (cached after first call)
-    if not hasattr(extract_ecapa_embedding, "_model"):
+    global _ECAPA_MODEL
+    if _ECAPA_MODEL is None:
         log.info("Loading ECAPA-TDNN model (first call — downloads ~80 MB)...")
-        setattr(extract_ecapa_embedding, "_model", EncoderClassifier.from_hparams(
+        _ECAPA_MODEL = EncoderClassifier.from_hparams(
             source="speechbrain/spkrec-ecapa-voxceleb",
             savedir=str(Path.home() / ".cache" / "speechbrain" / "ecapa"),
-        ))
-    model = getattr(extract_ecapa_embedding, "_model")
+        )
+    model = _ECAPA_MODEL
 
     signal, sr = torchaudio.load(str(wav_path))
     s_idx = int(start * sr)
