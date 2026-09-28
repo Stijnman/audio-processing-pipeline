@@ -6,7 +6,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from watcher import AUDIO_EXTENSIONS, is_file_stable, move_file
 
-
 # ── AUDIO_EXTENSIONS ──────────────────────────────────────────────────────────
 
 def test_audio_extensions_present():
