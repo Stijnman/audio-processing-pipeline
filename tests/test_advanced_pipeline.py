@@ -6,7 +6,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from advanced_pipeline import merge_intervals, stitch_chunks
 
-
 # ── stitch_chunks ─────────────────────────────────────────────────────────────
 
 def test_stitch_chunks_empty_base():
