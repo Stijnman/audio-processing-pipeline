@@ -181,7 +181,7 @@ def _run_pipeline(audio_path: str, output_dir: str, timeout: int,
     default_retry_delay=60,
     queue="celery",
 )
-def process_audio(self, audio_path: str, output_dir: str = None,
+def process_audio(self, audio_path: str, output_dir: str | None = None,
                   timeout: int = 3600, **kwargs) -> dict:
     """
     CPU pipeline task.
@@ -224,7 +224,7 @@ def process_audio(self, audio_path: str, output_dir: str = None,
     default_retry_delay=60,
     queue="gpu",
 )
-def process_audio_gpu(self, audio_path: str, output_dir: str = None,
+def process_audio_gpu(self, audio_path: str, output_dir: str | None = None,
                       timeout: int = 3600, **kwargs) -> dict:
     """
     GPU-optimised pipeline task (routes to the 'gpu' queue).

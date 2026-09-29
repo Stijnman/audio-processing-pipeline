@@ -44,7 +44,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import scipy.io.wavfile as wavfile
@@ -547,11 +547,14 @@ def extract_mfcc_embedding(wav_path: Path, start: float, end: float,
             mfcc       = dct(log_filter, type=2, norm="ortho")[:n_mfcc]
             mfcc_frames.append(mfcc)
 
-        return np.mean(mfcc_frames, axis=0)
+        return np.asarray(np.mean(mfcc_frames, axis=0))
 
     except Exception as e:
         log.debug("MFCC extraction error: %s", e)
         return np.zeros(n_mfcc)
+
+
+_ECAPA_MODEL: Any = None
 
 
 def extract_ecapa_embedding(wav_path: Path, start: float, end: float) -> np.ndarray:
@@ -565,13 +568,14 @@ def extract_ecapa_embedding(wav_path: Path, start: float, end: float) -> np.ndar
             "SpeechBrain is not installed. Run: pip install speechbrain torchaudio"
         )
     # Lazy-load model (cached after first call)
-    if not hasattr(extract_ecapa_embedding, "_model"):
+    global _ECAPA_MODEL
+    if _ECAPA_MODEL is None:
         log.info("Loading ECAPA-TDNN model (first call — downloads ~80 MB)...")
-        extract_ecapa_embedding._model = EncoderClassifier.from_hparams(
+        _ECAPA_MODEL = EncoderClassifier.from_hparams(
             source="speechbrain/spkrec-ecapa-voxceleb",
             savedir=str(Path.home() / ".cache" / "speechbrain" / "ecapa"),
         )
-    model = extract_ecapa_embedding._model
+    model = _ECAPA_MODEL
 
     signal, sr = torchaudio.load(str(wav_path))
     s_idx = int(start * sr)
@@ -586,7 +590,7 @@ def extract_ecapa_embedding(wav_path: Path, start: float, end: float) -> np.ndar
 
     with torch.no_grad():
         embedding = model.encode_batch(segment)
-    return embedding.squeeze().numpy()
+    return np.asarray(embedding.squeeze().numpy())
 
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -827,7 +831,7 @@ def extract_speaker_names(segments: list[dict], client, model: str) -> dict[str,
             log.info("Speaker names found: %s", mapping)
         else:
             log.info("No speaker names found in transcript.")
-        return mapping
+        return {str(key): str(value) for key, value in mapping.items()} if isinstance(mapping, dict) else {}
     except Exception:
         return {}
 
@@ -1128,8 +1132,8 @@ def run_pipeline(args: argparse.Namespace) -> None:
 
     # Clean up intermediate WAVs
     if not args.keep_wav:
-        for f in [raw_wav, output_dir / "enhanced.wav", output_dir / "vad.wav"]:
-            f.unlink(missing_ok=True)
+        for intermediate_path in [raw_wav, output_dir / "enhanced.wav", output_dir / "vad.wav"]:
+            intermediate_path.unlink(missing_ok=True)
 
     elapsed = time.time() - t_start
     log.info("=" * 60)

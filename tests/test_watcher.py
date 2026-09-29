@@ -1,13 +1,10 @@
-import pytest
 import argparse
-from pathlib import Path
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from watcher import is_file_stable, AUDIO_EXTENSIONS, move_file
-
+from watcher import AUDIO_EXTENSIONS, is_file_stable, move_file
 
 # ── AUDIO_EXTENSIONS ──────────────────────────────────────────────────────────
 
@@ -77,7 +74,7 @@ def test_move_file_collision(tmp_path):
 
 def test_watcher_cli_profile_db_default():
     """watcher.py's argument parser must accept --profile-db without error."""
-    import importlib.util, types
+    import importlib.util
     # Load watcher module without executing __main__
     spec = importlib.util.spec_from_file_location(
         "watcher",
