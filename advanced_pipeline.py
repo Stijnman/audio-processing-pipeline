@@ -50,7 +50,7 @@ import numpy as np
 import scipy.io.wavfile as wavfile
 from scipy.fftpack import dct
 
-# ── Optional imports ──────────────────────────────────────────────────────────
+# ââ Optional imports ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 try:
     from faster_whisper import WhisperModel
     FASTER_WHISPER_AVAILABLE = True
@@ -77,7 +77,7 @@ try:
 except ImportError:
     ECAPA_AVAILABLE = False
 
-# ── Logging ───────────────────────────────────────────────────────────────────
+# ââ Logging âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
@@ -86,9 +86,9 @@ logging.basicConfig(
 log = logging.getLogger("pipeline")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Audio Utilities
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def convert_to_wav(input_path: Path, output_path: Path, sample_rate: int = 16000) -> Path:
     """Convert any audio format to a 16 kHz mono WAV using ffmpeg."""
@@ -107,14 +107,14 @@ def convert_to_wav(input_path: Path, output_path: Path, sample_rate: int = 16000
 def studio_enhance(input_path: Path, output_path: Path) -> Path:
     """
     8-stage studio-quality audio enhancement chain:
-      1. highpass=f=80       — remove sub-bass rumble
-      2. lowpass=f=12000     — remove hiss above voice range
-      3. anlmdn              — non-local means broadband denoising
-      4. afftdn=nt=w:om=o    — FFT spectral subtraction
-      5. agate               — noise gate (silence between words)
-      6. acompressor         — dynamic range compression
-      7. speechnorm          — speech-specific loudness normalisation
-      8. alimiter            — true-peak limiter (-1 dBFS)
+      1. highpass=f=80       â remove sub-bass rumble
+      2. lowpass=f=12000     â remove hiss above voice range
+      3. anlmdn              â non-local means broadband denoising
+      4. afftdn=nt=w:om=o    â FFT spectral subtraction
+      5. agate               â noise gate (silence between words)
+      6. acompressor         â dynamic range compression
+      7. speechnorm          â speech-specific loudness normalisation
+      8. alimiter            â true-peak limiter (-1 dBFS)
     """
     log.info("Applying 8-stage studio enhancement...")
     filter_chain = (
@@ -138,6 +138,30 @@ def studio_enhance(input_path: Path, output_path: Path) -> Path:
         raise RuntimeError(f"Studio enhancement failed:\n{result.stderr[-800:]}")
     log.info("Studio enhancement complete: %s", output_path.name)
     return output_path
+
+
+def speech_intervals_from_silence(
+    silence_regions: list[tuple[float, float]],
+    total_dur: float,
+    pad: float = 0.15,
+) -> list[tuple[float, float]]:
+    """
+    Build speech intervals (the inverse of silence regions) with padding
+    around each speech burst. Silence that starts at t=0 has no speech
+    before it, so no interval is emitted there.
+    """
+    speech: list[tuple[float, float]] = []
+    cursor = 0.0
+    for s_start, s_end in silence_regions:
+        if s_start > 0.0:
+            seg_start = max(0.0, cursor - pad)
+            seg_end   = s_start + pad
+            if seg_end > seg_start + 0.05:
+                speech.append((seg_start, seg_end))
+        cursor = s_end
+    if cursor < total_dur:
+        speech.append((max(0.0, cursor - pad), total_dur))
+    return speech
 
 
 def vad_trim(input_path: Path, output_path: Path,
@@ -176,19 +200,10 @@ def vad_trim(input_path: Path, output_path: Path,
         s_end = ends[i] if i < len(ends) else total_dur
         silence_regions.append((s_start, s_end))
 
-    speech_intervals = []
-    cursor = 0.0
-    for s_start, s_end in silence_regions:
-        seg_start = max(0.0, cursor - pad)
-        seg_end   = s_start + pad
-        if seg_end > seg_start + 0.05:
-            speech_intervals.append((seg_start, seg_end))
-        cursor = s_end
-    if cursor < total_dur:
-        speech_intervals.append((max(0.0, cursor - pad), total_dur))
+    speech_intervals = speech_intervals_from_silence(silence_regions, total_dur, pad)
 
     if not speech_intervals:
-        log.warning("VAD found no speech — returning original audio.")
+        log.warning("VAD found no speech â returning original audio.")
         import shutil
         shutil.copy(str(input_path), str(output_path))
         return output_path
@@ -219,7 +234,7 @@ def vad_trim(input_path: Path, output_path: Path,
     else:
         original_dur = total_dur
         trimmed_dur  = sum(e - s for s, e in speech_intervals)
-        log.info("VAD: %.1fs → %.1fs (%.0f%% silence removed)",
+        log.info("VAD: %.1fs â %.1fs (%.0f%% silence removed)",
                  original_dur, trimmed_dur,
                  100 * (1 - trimmed_dur / max(original_dur, 0.001)))
     return output_path
@@ -238,49 +253,85 @@ def export_mp3(input_wav: Path, output_mp3: Path, quality: int = 2) -> Path:
     return output_mp3
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Transcription
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def auto_device() -> tuple[str, str]:
     """Automatically select the best available device and compute type."""
     try:
         import torch
         if torch.cuda.is_available():
-            log.info("GPU detected — using cuda/float16")
+            log.info("GPU detected â using cuda/float16")
             return "cuda", "float16"
     except ImportError:
         pass
-    log.info("No GPU detected — using cpu/int8")
+    log.info("No GPU detected â using cpu/int8")
     return "cpu", "int8"
 
 
 def stitch_chunks(base: list[dict], append: list[dict], overlap_sec: float) -> list[dict]:
     """
     Merge two overlapping transcript segment lists using SequenceMatcher.
-    Finds the longest common token run in the overlap zone and splices cleanly.
+
+    Chunk N+1 starts `overlap_sec` seconds before chunk N ends, so base
+    segments that end after the next chunk's start time may be re-transcribed
+    at the head of `append`. Candidate windows are therefore selected by
+    timestamp, not by segment count, so base segments outside the duplicated
+    audio can never be silently dropped.
+
+    If no common token run is found, both sides are kept — a duplicated
+    phrase is preferable to data loss.
     """
     if not base:
         return append
     if not append:
         return base
 
-    # Slice the overlap window from both sides
-    overlap_words = int(overlap_sec * 3)  # ~3 words/sec estimate
-    slice1 = [seg["text"].strip() for seg in base[-overlap_words:]]
-    slice2 = [seg["text"].strip() for seg in append[:overlap_words]]
+    # Start time of the appended chunk == start of the duplicated audio zone
+    try:
+        chunk_start = float(append[0]["start"])
+    except (KeyError, TypeError, ValueError):
+        chunk_start = 0.0
+    zone_end = chunk_start + overlap_sec
 
-    matcher = difflib.SequenceMatcher(None, slice1, slice2)
-    match   = matcher.find_longest_match(0, len(slice1), 0, len(slice2))
+    # Cap candidate list sizes for performance (~3 segments/sec heuristic)
+    overlap_words = max(1, int(overlap_sec * 3))
 
-    if match.size > 0:
-        # Splice at the midpoint of the longest identical token run
-        # slice1 is base[-overlap_words:]
-        # The match starts at match.a in slice1, which is len(base) - len(slice1) + match.a in base.
-        # We want to include the match from base, so we cut AFTER the match.
-        cut1 = len(base) - len(slice1) + match.a + match.size
-        cut2 = match.b + match.size
-        return base[:cut1] + append[cut2:]
+    # Base candidates: segments that end after the next chunk starts
+    base_idx = [i for i, seg in enumerate(base) if seg["end"] > chunk_start]
+    base_idx = base_idx[-overlap_words:]
+
+    # Append candidates: head segments that start inside the duplicated zone
+    # (small tolerance for Whisper timestamp jitter)
+    app_idx = [i for i, seg in enumerate(append)
+               if float(seg.get("start", 0.0)) < zone_end + 1.0]
+    app_idx = app_idx[:overlap_words * 2]
+
+    if base_idx and app_idx:
+        slice1 = [base[i]["text"].strip() for i in base_idx]
+        slice2 = [append[i]["text"].strip() for i in app_idx]
+
+        matcher = difflib.SequenceMatcher(None, slice1, slice2)
+        match   = matcher.find_longest_match(0, len(slice1), 0, len(slice2))
+
+        if match.size > 0:
+            if match.a + match.size == len(slice1):
+                # The matched run reaches the end of the base window, i.e.
+                # it is the tail of the old chunk re-transcribed at the head
+                # of the new one. Splice there: base keeps everything up to
+                # and including the run, append continues after its copy.
+                cut1 = base_idx[match.a + match.size - 1] + 1
+                cut2 = app_idx[match.b + match.size - 1] + 1
+                return base[:cut1] + append[cut2:]
+            # Match anchored mid-window (e.g. a repeated "you" or
+            # "thank you" earlier in the base). Splicing here would drop
+            # real segments after it — keep both sides instead.
+            log.warning(
+                "Ambiguous chunk overlap (matched run of %d ends mid-window) "
+                "— keeping both sides; transcript may contain a duplicated "
+                "phrase.", match.size,
+            )
 
     return base + append
 
@@ -320,7 +371,7 @@ def transcribe(wav_path: Path, args) -> list[dict]:
     all_segments: list[dict] = []
 
     if total_dur <= chunk_sec * 1.5:
-        # Short file — transcribe in one pass
+        # Short file â transcribe in one pass
         log.info("Transcribing (single pass, %.1fs)...", total_dur)
         segments, _ = model.transcribe(
             str(wav_path),
@@ -334,21 +385,23 @@ def transcribe(wav_path: Path, args) -> list[dict]:
         all_segments = [{"start": s.start, "end": s.end, "text": s.text.strip()}
                         for s in segments]
     else:
-        # Long file — dynamic chunking
+        # Long file â dynamic chunking
         log.info("Transcribing in chunks (chunk=%.0fs, overlap=%.0fs)...",
                  chunk_sec, overlap_sec)
         cursor = 0.0
         while cursor < total_dur:
             end = min(cursor + chunk_sec, total_dur)
-            log.info("  Chunk %.1fs – %.1fs", cursor, end)
+            log.info("  Chunk %.1fs â %.1fs", cursor, end)
 
             # Extract chunk to a temp file
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                 tmp_path = Path(tmp.name)
 
             subprocess.run([
-                "ffmpeg", "-y", "-i", str(wav_path),
-                "-ss", str(cursor), "-t", str(end - cursor),
+                "ffmpeg", "-y",
+                "-ss", str(cursor),   # input seeking: no re-decode from t=0
+                "-t", str(end - cursor),
+                "-i", str(wav_path),
                 "-ar", "16000", "-ac", "1", str(tmp_path),
             ], capture_output=True)
 
@@ -374,23 +427,28 @@ def transcribe(wav_path: Path, args) -> list[dict]:
     return all_segments
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Diarization
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-def diarize_llm(segments: list[dict], openai_client) -> list[dict]:
+def diarize_llm(segments: list[dict], openai_client,
+                model: str = "gpt-4o-mini") -> list[dict]:
     """
     Assign SPEAKER_A / SPEAKER_B to each segment using LLM turn-taking analysis.
-    Falls back gracefully if the API is unavailable.
+    Falls back gracefully if the API is unavailable or the response is unusable.
     """
-    if not OPENAI_AVAILABLE or openai_client is None:
-        log.warning("OpenAI not available — assigning alternating speakers.")
+
+    def _fallback_alternating() -> list[dict]:
         for i, seg in enumerate(segments):
             seg["speaker"] = "SPEAKER_A" if i % 2 == 0 else "SPEAKER_B"
         return segments
 
-    log.info("Running LLM diarization...")
-    lines = [f"[{i}] [{s['start']:.1f}s–{s['end']:.1f}s] {s['text']}"
+    if not OPENAI_AVAILABLE or openai_client is None:
+        log.warning("OpenAI not available - assigning alternating speakers.")
+        return _fallback_alternating()
+
+    log.info("Running LLM diarization (model=%s)...", model)
+    lines = [f"[{i}] [{s['start']:.1f}s - {s['end']:.1f}s] {s['text']}"
              for i, s in enumerate(segments)]
     transcript_text = "\n".join(lines)
 
@@ -403,14 +461,14 @@ def diarize_llm(segments: list[dict], openai_client) -> list[dict]:
         "- Speakers alternate in a phone call; use natural turn-taking as the primary signal.\n"
         "- Short affirmations ('Yes', 'OK', 'Mhmm') are typically the listening speaker.\n"
         "- Longer explanatory segments are typically the main speaker.\n"
-        "- Return ONLY a JSON array of objects: "
-        '[{"index": 0, "speaker": "SPEAKER_A"}, ...]\n'
+        "- Return ONLY a JSON object of the form: "
+        '{"assignments": [{"index": 0, "speaker": "SPEAKER_A"}, ...]}\n'
         "- Include every segment index. No extra text."
     )
 
     try:
         response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user",   "content": transcript_text},
@@ -420,17 +478,32 @@ def diarize_llm(segments: list[dict], openai_client) -> list[dict]:
         )
         raw = response.choices[0].message.content
         data = json.loads(raw)
-        # Accept both {"assignments": [...]} and bare [...]
+        # Accept both {"assignments": [...]} and a bare [...]
         assignments = data if isinstance(data, list) else data.get("assignments", [])
-        label_map = {item["index"]: item["speaker"] for item in assignments}
-        for i, seg in enumerate(segments):
-            seg["speaker"] = label_map.get(i, "SPEAKER_A")
+        label_map: dict[int, str] = {}
+        for item in assignments:
+            try:
+                idx = int(item["index"])
+                spk = str(item["speaker"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if 0 <= idx < len(segments):
+                label_map[idx] = spk
+        # Guard against garbled or partial responses: require majority coverage
+        # before trusting LLM labels. Without this, a malformed response would
+        # default every unmatched segment to SPEAKER_A silently.
+        if len(label_map) >= max(1, len(segments) // 2):
+            for i, seg in enumerate(segments):
+                seg["speaker"] = label_map.get(i, "SPEAKER_A" if i % 2 == 0 else "SPEAKER_B")
+            return segments
+        log.warning(
+            "LLM diarization returned usable labels for only %d/%d segments - "
+            "falling back to alternating.", len(label_map), len(segments),
+        )
     except Exception as e:
-        log.warning("LLM diarization error (%s) — falling back to alternating.", e)
-        for i, seg in enumerate(segments):
-            seg["speaker"] = "SPEAKER_A" if i % 2 == 0 else "SPEAKER_B"
+        log.warning("LLM diarization error (%s) - falling back to alternating.", e)
 
-    return segments
+    return _fallback_alternating()
 
 
 def diarize_pyannote(wav_path: Path, hf_token: str) -> list[dict]:
@@ -483,9 +556,9 @@ def merge_transcript_with_diarization(transcript: list[dict],
     return transcript
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Voice Profiling
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def extract_mfcc_embedding(wav_path: Path, start: float, end: float,
                             n_mfcc: int = 40) -> np.ndarray:
@@ -566,7 +639,7 @@ def extract_ecapa_embedding(wav_path: Path, start: float, end: float) -> np.ndar
         )
     # Lazy-load model (cached after first call)
     if not hasattr(extract_ecapa_embedding, "_model"):
-        log.info("Loading ECAPA-TDNN model (first call — downloads ~80 MB)...")
+        log.info("Loading ECAPA-TDNN model (first call â downloads ~80 MB)...")
         extract_ecapa_embedding._model = EncoderClassifier.from_hparams(
             source="speechbrain/spkrec-ecapa-voxceleb",
             savedir=str(Path.home() / ".cache" / "speechbrain" / "ecapa"),
@@ -722,9 +795,9 @@ def apply_voice_profiling(segments: list[dict], wav_path: Path,
     return segments
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # LLM Post-Processing
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def llm_call(client, system_prompt: str, user_content: str,
              model: str = "gpt-4o-mini", fallback=None):
@@ -762,7 +835,7 @@ def post_correct(segments: list[dict], client, model: str) -> list[dict]:
         "1. Correct homophone errors (e.g. 'their' vs 'there', 'to' vs 'too')\n"
         "2. Restore missing punctuation and capitalisation\n"
         "3. Fix technical terms, product names, and proper nouns\n"
-        "4. Remove filler repetitions (e.g. 'I I I think' → 'I think')\n"
+        "4. Remove filler repetitions (e.g. 'I I I think' â 'I think')\n"
         "5. Preserve the original meaning and speaker labels exactly\n\n"
         "Return ONLY a JSON array with the same structure as the input. "
         "Each object must have 'start', 'end', 'text', and 'speaker' fields."
@@ -789,7 +862,7 @@ def post_correct(segments: list[dict], client, model: str) -> list[dict]:
             else:
                 corrected.extend(batch)
         except json.JSONDecodeError:
-            log.warning("Post-correction JSON parse error — keeping original batch.")
+            log.warning("Post-correction JSON parse error â keeping original batch.")
             corrected.extend(batch)
 
     log.info("Post-correction complete.")
@@ -832,9 +905,9 @@ def extract_speaker_names(segments: list[dict], client, model: str) -> dict[str,
         return {}
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Audio Splitting
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def merge_intervals(intervals: list[tuple[float, float]],
                     gap: float = 0.3) -> list[tuple[float, float]]:
@@ -853,12 +926,12 @@ def merge_intervals(intervals: list[tuple[float, float]],
 
 def split_audio_by_speaker(wav_path: Path, segments: list[dict],
                             output_dir: Path, keep_timing: bool,
-                            fmt: str = "mp3") -> dict[str, Path]:
+                            fmt: str = "mp3", stem: str = "") -> dict[str, Path]:
     """
     Split audio into per-speaker tracks.
 
     keep_timing=False (default):
-        Concatenate only the speaker's segments — shorter, no silence.
+        Concatenate only the speaker's segments â shorter, no silence.
 
     keep_timing=True:
         Full-length file with silence where the other speaker talks.
@@ -875,8 +948,9 @@ def split_audio_by_speaker(wav_path: Path, segments: list[dict],
     for spk, intervals in speaker_intervals.items():
         intervals = merge_intervals(intervals, gap=0.3)
         safe_name = spk.lower().replace(" ", "_").replace("/", "_")
-        out_wav   = output_dir / f"speaker_{safe_name}.wav"
-        out_file  = output_dir / f"speaker_{safe_name}.{fmt}"
+        prefix    = f"{stem}_" if stem else ""
+        out_wav   = output_dir / f"{prefix}speaker_{safe_name}.wav"
+        out_file  = output_dir / f"{prefix}speaker_{safe_name}.{fmt}"
 
         if keep_timing:
             # Get total duration
@@ -956,14 +1030,14 @@ def split_audio_by_speaker(wav_path: Path, segments: list[dict],
             out_file = out_wav
 
         output_files[spk] = out_file
-        log.info("Speaker track: %s → %s", spk, out_file.name)
+        log.info("Speaker track: %s â %s", spk, out_file.name)
 
     return output_files
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Output Writers
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def write_transcript(segments: list[dict], output_path: Path) -> None:
     """Write a human-readable speaker-labelled transcript."""
@@ -972,7 +1046,7 @@ def write_transcript(segments: list[dict], output_path: Path) -> None:
         for seg in segments:
             spk  = seg.get("speaker", "SPEAKER_A")
             text = seg.get("text", "").strip()
-            ts   = f"[{seg['start']:.1f}s – {seg['end']:.1f}s]"
+            ts   = f"[{seg['start']:.1f}s â {seg['end']:.1f}s]"
             if spk != current_speaker:
                 f.write(f"\n{spk}:\n")
                 current_speaker = spk
@@ -987,9 +1061,9 @@ def write_diarization_json(segments: list[dict], output_path: Path) -> None:
     log.info("Diarization JSON written: %s", output_path.name)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Main Pipeline
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def run_pipeline(args: argparse.Namespace) -> None:
     t_start = time.time()
@@ -1002,7 +1076,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── OpenAI client ─────────────────────────────────────────────────────────
+    # ââ OpenAI client âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     openai_client = None
     if OPENAI_AVAILABLE and (args.post_correct or args.name_speakers or
                               args.diarizer == "llm"):
@@ -1012,12 +1086,12 @@ def run_pipeline(args: argparse.Namespace) -> None:
         except Exception as e:
             log.warning("OpenAI init failed: %s", e)
 
-    # ── Step 1: Convert to WAV ─────────────────────────────────────────────────
+    # ââ Step 1: Convert to WAV âââââââââââââââââââââââââââââââââââââââââââââââââ
     log.info("Step 1/7: Converting to WAV...")
     raw_wav = output_dir / "raw.wav"
     convert_to_wav(input_path, raw_wav)
 
-    # ── Step 2: Studio enhancement ────────────────────────────────────────────
+    # ââ Step 2: Studio enhancement ââââââââââââââââââââââââââââââââââââââââââââ
     if args.studio:
         log.info("Step 2/7: Studio enhancement...")
         enhanced_wav = output_dir / "enhanced.wav"
@@ -1026,7 +1100,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
     else:
         work_wav = raw_wav
 
-    # ── Step 3: VAD trim ──────────────────────────────────────────────────────
+    # ââ Step 3: VAD trim ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     if args.vad:
         log.info("Step 3/7: VAD silence removal...")
         vad_wav = output_dir / "vad.wav"
@@ -1043,7 +1117,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
     export_mp3(vad_out, clean_mp3)
     log.info("Clean MP3 saved: %s", clean_mp3.name)
 
-    # ── Step 4: Transcription ─────────────────────────────────────────────────
+    # ââ Step 4: Transcription âââââââââââââââââââââââââââââââââââââââââââââââââ
     if args.json:
         log.info("Step 4/7: Loading pre-supplied diarization JSON...")
         with open(args.json) as f:
@@ -1066,7 +1140,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
         log.info("Step 4/7: Transcribing audio...")
         segments = transcribe(vad_out, args)
 
-    # ── Step 5: Diarization ───────────────────────────────────────────────────
+    # ââ Step 5: Diarization âââââââââââââââââââââââââââââââââââââââââââââââââââ
     if not args.json or not any("speaker" in s for s in segments):
         log.info("Step 5/7: Diarizing speakers (%s)...", args.diarizer)
         if args.diarizer == "pyannote":
@@ -1076,11 +1150,11 @@ def run_pipeline(args: argparse.Namespace) -> None:
             diar_turns = diarize_pyannote(vad_out, args.hf_token)
             segments   = merge_transcript_with_diarization(segments, diar_turns)
         else:
-            segments = diarize_llm(segments, openai_client)
+            segments = diarize_llm(segments, openai_client, args.post_correct_model)
     else:
-        log.info("Step 5/7: Speaker labels already present — skipping diarization.")
+        log.info("Step 5/7: Speaker labels already present â skipping diarization.")
 
-    # ── Step 6: Voice profiling ───────────────────────────────────────────────
+    # ââ Step 6: Voice profiling âââââââââââââââââââââââââââââââââââââââââââââââ
     profile_db = SpeakerProfileDB(Path(args.profile_db))
     if len(profile_db.profiles) > 0 or args.enroll_unknown:
         log.info("Step 6/7: Voice profiling (embedder=%s)...",
@@ -1093,9 +1167,9 @@ def run_pipeline(args: argparse.Namespace) -> None:
         )
         profile_db.save()
     else:
-        log.info("Step 6/7: No profiles loaded and --enroll-unknown not set — skipping profiling.")
+        log.info("Step 6/7: No profiles loaded and --enroll-unknown not set â skipping profiling.")
 
-    # ── Step 6b: Name recognition ─────────────────────────────────────────────
+    # ââ Step 6b: Name recognition âââââââââââââââââââââââââââââââââââââââââââââ
     if args.name_speakers and openai_client:
         name_map = extract_speaker_names(segments, openai_client, args.post_correct_model)
         if name_map:
@@ -1109,21 +1183,23 @@ def run_pipeline(args: argparse.Namespace) -> None:
                     profile_db.profiles[new_name] = profile_db.profiles.pop(old_name)
             profile_db.save()
 
-    # ── Step 7: LLM post-correction ───────────────────────────────────────────
+    # ââ Step 7: LLM post-correction âââââââââââââââââââââââââââââââââââââââââââ
     if args.post_correct and openai_client:
         log.info("Step 7/7: LLM post-correction...")
         segments = post_correct(segments, openai_client, args.post_correct_model)
     else:
         log.info("Step 7/7: Skipping post-correction.")
 
-    # ── Outputs ───────────────────────────────────────────────────────────────
-    write_transcript(segments, output_dir / "transcript.txt")
-    write_diarization_json(segments, output_dir / "diarization.json")
+    # ââ Outputs âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+    stem = input_path.stem
+    write_transcript(segments, output_dir / f"{stem}_transcript.txt")
+    write_diarization_json(segments, output_dir / f"{stem}_diarization.json")
 
     speaker_files = split_audio_by_speaker(
         vad_out, segments, output_dir,
         keep_timing=args.keep_timing,
         fmt=args.format,
+        stem=stem,
     )
 
     # Clean up intermediate WAVs
@@ -1136,16 +1212,16 @@ def run_pipeline(args: argparse.Namespace) -> None:
     log.info("Pipeline complete in %.1fs", elapsed)
     log.info("Output directory: %s", output_dir)
     log.info("  Clean MP3:      %s", clean_mp3.name)
-    log.info("  Transcript:     transcript.txt")
-    log.info("  Diarization:    diarization.json")
+    log.info("  Transcript:     %s_transcript.txt", stem)
+    log.info("  Diarization:    %s_diarization.json", stem)
     for _spk, path in speaker_files.items():
         log.info("  Speaker track:  %s", path.name)
     log.info("=" * 60)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # CLI
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -1191,7 +1267,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--overlap-sec", type=int, default=5,
                    help="Overlap between chunks for stitching (seconds)")
     p.add_argument("--vad-threshold", type=float, default=0.5,
-                   help="Silero VAD speech probability threshold (0–1)")
+                   help="Silero VAD speech probability threshold (0â1)")
     p.add_argument("--vad-min-silence", type=int, default=500,
                    help="Silero VAD minimum silence duration (ms)")
 
@@ -1236,3 +1312,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

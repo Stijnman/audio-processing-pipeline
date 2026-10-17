@@ -156,17 +156,20 @@ Arguments:
 
 Audio Enhancement:
   --studio                Apply all 8 enhancement stages
-  --vad                   Remove silence (sound-activated recording)
+  --vad                   Remove silence with ffmpeg silencedetect (sound-activated recording)
   --vad-noise-db DB       Silence threshold in dB (default: -30)
-  --vad-min-silence SEC   Minimum silence duration to cut (default: 0.5)
+  --vad-min-silence-sec SEC  Minimum silence duration to cut (default: 0.5)
+  --vad-pad SEC           Padding to keep around speech bursts (default: 0.15)
 
 Transcription:
-  --model MODEL           Whisper model: tiny, base, small, medium, large-v2, large-v3
+  --model MODEL           Whisper model: tiny, base, small, medium, large-v2, large-v3 (default: base)
   --device DEVICE         Device: auto, cpu, cuda (default: auto)
   --compute TYPE          Quantization: auto, int8, float16, int8_float16 (default: auto)
   --language LANG         Language code, e.g. nl, en, de (default: auto-detect)
-  --chunk-sec N           Chunk size in seconds for long files (default: 60)
-  --overlap-sec N         Overlap between chunks in seconds (default: 2)
+  --chunk-sec N           Chunk size in seconds for long files (default: 300)
+  --overlap-sec N         Overlap between chunks in seconds (default: 5)
+  --vad-threshold F       Silero VAD speech probability threshold 0–1 (default: 0.5)
+  --vad-min-silence MS    Silero VAD minimum silence duration in ms (default: 500)
 
 Diarization:
   --diarizer {llm,pyannote}   Diarization engine (default: llm)
@@ -174,19 +177,21 @@ Diarization:
   --json FILE                 Use pre-existing diarization JSON (skip transcription)
 
 Voice Profiling:
-  --profile-db FILE       Path to voice profile database (JSON)
+  --profile-db FILE       Path to voice profile database JSON (default: profiles.json)
   --enroll-unknown        Enroll unmatched speakers automatically
   --ecapa                 Use ECAPA-TDNN embeddings (requires speechbrain)
   --profile-threshold F   Cosine similarity threshold (default: 0.75)
 
 LLM Features (require OPENAI_API_KEY):
   --post-correct          Fix homophones, punctuation, ASR artefacts
+  --post-correct-model M  LLM model for post-correction and diarization (default: gpt-4o-mini)
   --name-speakers         Detect real names from transcript context
 
 Output:
-  --output-dir DIR        Output directory (default: same as input)
+  --output-dir DIR        Output directory (default: output)
   --keep-timing           Full-length sync'd tracks (silence where other speaker talks)
   --format {mp3,wav,ogg,flac}  Output format (default: mp3)
+  --keep-wav              Keep intermediate WAV files
 ```
 
 ---
@@ -218,7 +223,7 @@ python advanced_pipeline.py call1.amr \
 
 # Step 3 — All subsequent calls: automatic name matching
 python advanced_pipeline.py call2.amr --profile-db profiles.json
-# Output: speaker_alice.mp3, speaker_bob.mp3
+# Output: call2_speaker_alice.mp3, call2_speaker_bob.mp3
 ```
 
 > **Note on phone audio:** GSM/AMR compression (8 kHz, heavy quantization) strips spectral detail that distinguishes voices. MFCC embeddings work well for re-identifying the same speaker across different calls. For blind separation of two unknown speakers from the same compressed call, use `--ecapa` (ECAPA-TDNN) or `--diarizer pyannote`.
@@ -316,6 +321,9 @@ See **[docs/TERMUX.md](docs/TERMUX.md)** for the full guide, including recommend
 | `HF_TOKEN` | `--diarizer pyannote` |
 | `CELERY_BROKER_URL` | Celery workers (default: `redis://localhost:6379/0`) |
 | `CELERY_RESULT_URL` | Celery result backend (default: `redis://localhost:6379/1`) |
+| `INBOX_DIR` | watcher.py default inbox (used when `--inbox` is omitted) |
+| `OUTPUT_DIR` | watcher.py default output (used when `--output` is omitted) |
+| `PROCESSED_DIR` | watcher.py default processed dir (used when `--processed` is omitted) |
 
 Copy `.env.example` to `.env` and fill in your values.
 
@@ -335,7 +343,7 @@ Copy `.env.example` to `.env` and fill in your values.
 | `.env.example` | Environment variable template |
 | `termux_install.sh` | One-command Termux/Android installer |
 | `docs/ARCHITECTURE.md` | Pipeline stages, design decisions, embedding strategy |
-| `docs/TERMUX.md` | Android/Termux setup, usage, and troubleshooting |
+| `docs/TERMUX.md` | Android/Termux setup, storage access, model recommendations, troubleshooting |
 
 ---
 

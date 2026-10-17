@@ -8,11 +8,11 @@ Enables parallel processing of high call volumes across multiple machines.
 Uses Redis as the message broker (lightweight, single Docker container).
 
 Architecture:
-  ┌─────────────┐      ┌───────────────┐      ┌──────────────────┐
-  │  Producer   │─────▶│  Redis Broker │─────▶│  Celery Workers  │
-  │ (watcher /  │      │  (task queue) │      │  (1–N machines)  │
-  │   API call) │      └───────────────┘      └──────────────────┘
-  └─────────────┘
+  âââââââââââââââ      âââââââââââââââââ      ââââââââââââââââââââ
+  â  Producer   âââââââ¶â  Redis Broker âââââââ¶â  Celery Workers  â
+  â (watcher /  â      â  (task queue) â      â  (1âN machines)  â
+  â   API call) â      âââââââââââââââââ      ââââââââââââââââââââ
+  âââââââââââââââ
 
 Usage:
   # Start Redis (Docker):
@@ -36,10 +36,10 @@ Install:
   pip install celery redis flower
 
 Environment variables:
-  CELERY_BROKER_URL   — default: redis://localhost:6379/0
-  CELERY_RESULT_URL   — default: redis://localhost:6379/1
-  OPENAI_API_KEY      — required for LLM features
-  HF_TOKEN            — required for PyAnnote diarization
+  CELERY_BROKER_URL   â default: redis://localhost:6379/0
+  CELERY_RESULT_URL   â default: redis://localhost:6379/1
+  OPENAI_API_KEY      â required for LLM features
+  HF_TOKEN            â required for PyAnnote diarization
 """
 
 import os
@@ -50,7 +50,7 @@ from pathlib import Path
 from celery import Celery
 from celery.utils.log import get_task_logger
 
-# ── Celery app configuration ──────────────────────────────────────────────────
+# ââ Celery app configuration ââââââââââââââââââââââââââââââââââââââââââââââââââ
 BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
 RESULT_URL = os.environ.get("CELERY_RESULT_URL", "redis://localhost:6379/1")
 
@@ -93,9 +93,9 @@ log = get_task_logger(__name__)
 PIPELINE_SCRIPT = str(Path(__file__).parent / "advanced_pipeline.py")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Shared task logic
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def _build_cmd(audio_path: str, output_dir: str, **kwargs) -> list[str]:
     """Build the advanced_pipeline.py command from keyword arguments."""
@@ -145,7 +145,7 @@ def _run_pipeline(audio_path: str, output_dir: str, timeout: int,
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     cmd = _build_cmd(audio_path, output_dir, **kwargs)
 
-    log.info("Running pipeline: %s → %s", Path(audio_path).name, output_dir)
+    log.info("Running pipeline: %s â %s", Path(audio_path).name, output_dir)
     try:
         result = subprocess.run(cmd, timeout=timeout, capture_output=True, text=True)
         if result.returncode == 0:
@@ -170,9 +170,9 @@ def _run_pipeline(audio_path: str, output_dir: str, timeout: int,
         }
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Celery Tasks
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 @app.task(
     bind=True,
@@ -210,11 +210,24 @@ def process_audio(self, audio_path: str, output_dir: str = None,
         output_dir = str(Path("/output") / stem)
 
     try:
-        return _run_pipeline(audio_path, output_dir, timeout, **kwargs)
+        result = _run_pipeline(audio_path, output_dir, timeout, **kwargs)
     except Exception as exc:
         log.error("Task failed: %s — retrying (%d/%d)",
                   exc, self.request.retries, self.max_retries)
         raise self.retry(exc=exc)
+
+    # Pipeline failures return a status dict rather than raising, so retry
+    # them explicitly — otherwise the retry configuration never fires for
+    # the most common failure mode.
+    if result.get("status") != "success" and self.request.retries < self.max_retries:
+        log.warning("Pipeline %s for %s — retrying (%d/%d)",
+                    result.get("status"), audio_path,
+                    self.request.retries + 1, self.max_retries)
+        raise self.retry(
+            exc=RuntimeError(result.get("error", "pipeline failed")),
+            countdown=self.default_retry_delay * (2 ** self.request.retries),
+        )
+    return result
 
 
 @app.task(
@@ -247,12 +260,26 @@ def process_audio_gpu(self, audio_path: str, output_dir: str = None,
         stem       = Path(audio_path).stem
         output_dir = str(Path("/output") / stem)
 
+
     try:
-        return _run_pipeline(audio_path, output_dir, timeout, **kwargs)
+        result = _run_pipeline(audio_path, output_dir, timeout, **kwargs)
     except Exception as exc:
         log.error("GPU task failed: %s — retrying (%d/%d)",
                   exc, self.request.retries, self.max_retries)
         raise self.retry(exc=exc)
+
+    # Pipeline failures return a status dict rather than raising, so retry
+    # them explicitly — otherwise the retry configuration never fires for
+    # the most common failure mode.
+    if result.get("status") != "success" and self.request.retries < self.max_retries:
+        log.warning("Pipeline %s for %s — retrying (%d/%d)",
+                    result.get("status"), audio_path,
+                    self.request.retries + 1, self.max_retries)
+        raise self.retry(
+            exc=RuntimeError(result.get("error", "pipeline failed")),
+            countdown=self.default_retry_delay * (2 ** self.request.retries),
+        )
+    return result
 
 
 @app.task(name="tasks.batch_process")
@@ -282,9 +309,9 @@ def batch_process(audio_paths: list[str], output_base: str = "/output",
     return task_ids
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # CLI helper: submit a single file from the command line
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 if __name__ == "__main__":
     import argparse
@@ -322,3 +349,4 @@ if __name__ == "__main__":
             print(f"Output: {result['output_dir']}")
         else:
             print(f"Error: {result.get('error', 'unknown')}")
+
