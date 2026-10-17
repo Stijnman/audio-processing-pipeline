@@ -15,6 +15,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Added GitHub Actions Docker workflow (`docker.yml`): build smoke-test and `docker-compose config` validation
 - Added `pyproject.toml` with `[tool.ruff]` and `[tool.mypy]` configuration and optional dependency extras
 - Added `requirements-dev.txt` for local development setup
+- Added pytest test suite for `AudioPipeline.py` (single-file edition)
 
 ### Fixed
 - Fixed silent transcript data loss in `stitch_chunks`: overlap windows are now
@@ -45,6 +46,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Fixed bug in `advanced_pipeline.py`'s `stitch_chunks` where the overlapping match was excluded instead of deduplicated.
 - Fixed `watcher.py` CLI parser to correctly parse arguments using `p.parse_args()` instead of the module-level function.
 - Fixed `termux_install.sh` generating `watch.sh` with an invalid `--output` flag (updated to `--output-dir`).
+- Fixed the same silent transcript data loss bug in `AudioPipeline.py` (single-file
+  edition): `stitch_chunks` now selects overlap candidates by timestamp and keeps
+  both sides on ambiguous matches, matching the `advanced_pipeline.py` fix
+- Fixed `AudioPipeline.py` `vad_trim` keeping a pad-length sliver of pure silence on
+  recordings that start with silence; interval math extracted into
+  `speech_intervals_from_silence`
+- Fixed `AudioPipeline.py` `diarize_llm` hardcoding `gpt-4o-mini` and trusting
+  malformed or partial LLM responses: it now honours `--post-correct-model`,
+  validates assignments, and falls back to alternating speakers below majority
+  coverage
+- Fixed `AudioPipeline.py` watcher processing the same file twice when the startup
+  scan, poll loop, or filesystem events all see one file: files are now tracked
+  in an in-flight claim set until they are moved out of the inbox
+- Fixed `AudioPipeline.py` watcher missing files moved (not created) into the
+  inbox: added `on_moved` handling and removed the blocking sleep from the
+  watchdog event thread
+- Fixed slow chunk extraction in `AudioPipeline.py` `transcribe`: `-ss` now uses
+  input seeking instead of re-decoding from the start of the file for every chunk
+- Fixed `AudioPipeline.py` overwriting previous results when several runs share
+  an output directory: transcript, diarization and per-speaker files are now
+  prefixed with the input stem
+- Fixed `AudioPipeline.py` auto-installing packages whenever it is imported; the
+  bootstrap now only runs when the file is executed as a script
+- Fixed `AudioPipeline.py` watch mode ignoring the `INBOX_DIR` / `OUTPUT_DIR` /
+  `PROCESSED_DIR` environment variables; they now provide CLI defaults
 
 ---
 
