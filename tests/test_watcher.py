@@ -6,10 +6,11 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from watcher import is_file_stable, AUDIO_EXTENSIONS, move_file
+from watcher import (is_file_stable, AUDIO_EXTENSIONS, move_file,
+                  build_parser)
 
 
-# ── AUDIO_EXTENSIONS ──────────────────────────────────────────────────────────
+# ââ AUDIO_EXTENSIONS ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def test_audio_extensions_present():
     """All expected audio formats are in the supported set."""
@@ -24,7 +25,7 @@ def test_audio_extensions_absent():
         assert ext not in AUDIO_EXTENSIONS, f"{ext} should not be in AUDIO_EXTENSIONS"
 
 
-# ── is_file_stable ────────────────────────────────────────────────────────────
+# ââ is_file_stable ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def test_is_file_stable_existing(tmp_path):
     """A file that is not being written should be reported as stable."""
@@ -45,7 +46,7 @@ def test_is_file_stable_empty(tmp_path):
     assert is_file_stable(f, wait=0.05) is False
 
 
-# ── move_file ─────────────────────────────────────────────────────────────────
+# ââ move_file âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def test_move_file_success(tmp_path):
     """A successfully processed file is moved to the dest directory."""
@@ -73,37 +74,53 @@ def test_move_file_collision(tmp_path):
     assert (dest_dir / "call_1.mp3").exists()
 
 
-# ── watcher.py CLI --profile-db argument ─────────────────────────────────────
 
 def test_watcher_cli_profile_db_default():
-    """watcher.py's argument parser must accept --profile-db without error."""
-    import importlib.util, types
-    # Load watcher module without executing __main__
-    spec = importlib.util.spec_from_file_location(
-        "watcher",
-        os.path.join(os.path.dirname(__file__), "..", "watcher.py"),
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-
-    # Build the parser and parse with no args (all defaults)
-    p = argparse.ArgumentParser()
-    p.add_argument("--profile-db", default="profiles.json")
-    args = p.parse_args([])
+    """watcher.py's actual parser must default --profile-db to profiles.json."""
+    args = build_parser().parse_args([])
     assert args.profile_db == "profiles.json"
 
 
 def test_watcher_cli_profile_db_custom():
-    """watcher.py's argument parser must accept a custom --profile-db path."""
-    import importlib.util
-    spec = importlib.util.spec_from_file_location(
-        "watcher2",
-        os.path.join(os.path.dirname(__file__), "..", "watcher.py"),
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-
-    p = argparse.ArgumentParser()
-    p.add_argument("--profile-db", default="profiles.json")
-    args = p.parse_args(["--profile-db", "/profiles/custom.json"])
+    args = build_parser().parse_args(["--profile-db", "/profiles/custom.json"])
     assert args.profile_db == "/profiles/custom.json"
+
+
+def test_watcher_cli_forwards_all_pipeline_flags():
+    args = build_parser().parse_args([
+        "--studio", "--vad", "--post-correct", "--name-speakers",
+        "--keep-timing", "--enroll-unknown", "--ecapa",
+    ])
+    assert args.studio and args.vad and args.post_correct
+    assert args.name_speakers and args.keep_timing
+    assert args.enroll_unknown and args.ecapa
+
+
+def test_watcher_cli_directory_defaults_from_env(monkeypatch):
+    """INBOX_DIR / OUTPUT_DIR / PROCESSED_DIR env vars must set defaults."""
+    monkeypatch.setenv("INBOX_DIR", "/data/inbox")
+    monkeypatch.setenv("OUTPUT_DIR", "/data/out")
+    monkeypatch.setenv("PROCESSED_DIR", "/data/done")
+    args = build_parser().parse_args([])
+    assert args.inbox == "/data/inbox"
+    assert args.output == "/data/out"
+    assert args.processed == "/data/done"
+
+
+def test_watcher_cli_flags_override_env(monkeypatch):
+    monkeypatch.setenv("INBOX_DIR", "/data/inbox")
+    args = build_parser().parse_args(["--inbox", "/other/inbox"])
+    assert args.inbox == "/other/inbox"
+
+
+def test_watcher_in_flight_claim_release(tmp_path):
+    """A file claimed for processing must not be claimable a second time."""
+    import watcher as watcher_mod
+
+    f = tmp_path / "call.mp3"
+    f.write_text("audio")
+    assert watcher_mod._claim(f) is True
+    assert watcher_mod._claim(f) is False  # duplicate submission blocked
+    watcher_mod._release(f)
+    assert watcher_mod._claim(f) is True
+    watcher_mod._release(f)

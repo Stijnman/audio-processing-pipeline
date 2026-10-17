@@ -18,8 +18,8 @@ Usage:
   python watcher.py --workers 4             # parallel processing
 
 Environment variables:
-  OPENAI_API_KEY   — required for LLM features
-  HF_TOKEN         — required for PyAnnote diarization
+  OPENAI_API_KEY   â required for LLM features
+  HF_TOKEN         â required for PyAnnote diarization
 
 Install:
   pip install watchdog   # optional but recommended
@@ -31,11 +31,12 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-# ── Logging ───────────────────────────────────────────────────────────────────
+# ââ Logging âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  [watcher]  %(message)s",
@@ -43,16 +44,39 @@ logging.basicConfig(
 )
 log = logging.getLogger("watcher")
 
-# ── Supported audio extensions ────────────────────────────────────────────────
+# ââ Supported audio extensions ââââââââââââââââââââââââââââââââââââââââââââââââ
 AUDIO_EXTENSIONS = {
     ".amr", ".mp3", ".wav", ".m4a", ".ogg", ".flac",
     ".aac", ".wma", ".opus", ".webm", ".mp4",
 }
 
+# Paths currently being processed. Prevents duplicate submissions: polling
+# mode rescans the inbox before the pipeline finishes, and a file remains in
+# the inbox until it is moved after processing, so without this guard the
+# same file would be submitted again every poll interval.
+_in_flight: set[str] = set()
+_in_flight_lock = threading.Lock()
 
-# ══════════════════════════════════════════════════════════════════════════════
+
+def _claim(path: Path) -> bool:
+    """Atomically mark a file as in-flight. Returns False if already claimed."""
+    with _in_flight_lock:
+        if str(path) in _in_flight:
+            return False
+        _in_flight.add(str(path))
+        return True
+
+
+def _release(path: Path) -> None:
+    """Mark a file as no longer being processed."""
+    with _in_flight_lock:
+        _in_flight.discard(str(path))
+
+
+
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Pipeline Runner
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 def process_file(audio_path: Path, args: argparse.Namespace) -> bool:
     """
@@ -63,7 +87,7 @@ def process_file(audio_path: Path, args: argparse.Namespace) -> bool:
     output_dir = Path(args.output) / stem
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    log.info("Processing: %s → %s", audio_path.name, output_dir)
+    log.info("Processing: %s â %s", audio_path.name, output_dir)
 
     # Build the pipeline command
     cmd = [
@@ -143,6 +167,10 @@ def scan_and_process(inbox: Path, args: argparse.Namespace,
             if not is_file_stable(f):
                 log.debug("Skipping unstable file: %s", f.name)
                 continue
+            # Skip files already being processed (duplicate submission guard)
+            if not _claim(f):
+                log.debug("Skipping in-flight file: %s", f.name)
+                continue
             future = executor.submit(process_file, f, args)
             futures[future] = f
 
@@ -151,6 +179,7 @@ def scan_and_process(inbox: Path, args: argparse.Namespace,
         success = future.result()
         dest_dir = Path(args.processed) if success else Path(args.processed) / "failed"
         move_file(f, dest_dir, success)
+        _release(f)
 
 
 def is_file_stable(path: Path, wait: float = 1.0) -> bool:
@@ -167,9 +196,9 @@ def is_file_stable(path: Path, wait: float = 1.0) -> bool:
         return False
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 # Watchdog Integration (inotify / FSEvents)
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 try:
     from watchdog.events import FileSystemEventHandler
@@ -185,7 +214,26 @@ class AudioFileHandler(FileSystemEventHandler if WATCHDOG_AVAILABLE else object)
     def __init__(self, args: argparse.Namespace, executor: ThreadPoolExecutor):
         self.args     = args
         self.executor = executor
-        self._pending: set[str] = set()
+
+    def _submit_delayed(self, path: Path) -> None:
+        if not _claim(path):
+            return
+        log.info("New file detected: %s", path.name)
+
+        # Wait for the file to finish writing, then process
+        def delayed_process():
+            time.sleep(2.0)  # brief delay for write completion
+            try:
+                if not is_file_stable(path, wait=1.0):
+                    log.warning("File still unstable, skipping: %s", path.name)
+                    return
+                success  = process_file(path, self.args)
+                dest_dir = Path(self.args.processed) if success else Path(self.args.processed) / "failed"
+                move_file(path, dest_dir, success)
+            finally:
+                _release(path)
+
+        self.executor.submit(delayed_process)
 
     def on_created(self, event):
         if event.is_directory:
@@ -193,40 +241,36 @@ class AudioFileHandler(FileSystemEventHandler if WATCHDOG_AVAILABLE else object)
         path = Path(event.src_path)
         if path.suffix.lower() not in AUDIO_EXTENSIONS:
             return
-        if str(path) in self._pending:
+        self._submit_delayed(path)
+
+    def on_moved(self, event):
+        """Handle files moved or renamed into the inbox (mv, sync tools)."""
+        if event.is_directory:
             return
-        self._pending.add(str(path))
-        log.info("New file detected: %s", path.name)
-
-        # Wait for the file to finish writing, then process
-        def delayed_process():
-            time.sleep(2.0)  # brief delay for write completion
-            if not is_file_stable(path, wait=1.0):
-                log.warning("File still unstable, skipping: %s", path.name)
-                self._pending.discard(str(path))
-                return
-            success  = process_file(path, self.args)
-            dest_dir = Path(self.args.processed) if success else Path(self.args.processed) / "failed"
-            move_file(path, dest_dir, success)
-            self._pending.discard(str(path))
-
-        self.executor.submit(delayed_process)
+        dest = Path(event.dest_path)
+        if dest.suffix.lower() not in AUDIO_EXTENSIONS:
+            return
+        self._submit_delayed(dest)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
 # Main
-# ══════════════════════════════════════════════════════════════════════════════
+# ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """Build the watcher CLI parser. Extracted so tests can exercise the
+    real argument surface instead of a re-implemented copy."""
     p = argparse.ArgumentParser(
         description="Zero-touch audio pipeline directory watcher",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    # Directories
-    p.add_argument("--inbox",     default="/inbox",     help="Directory to watch for new audio files")
-    p.add_argument("--output",    default="/output",    help="Directory for pipeline output")
-    p.add_argument("--processed", default="/processed", help="Directory for processed input files")
+    # Directories — CLI flags take precedence over environment variables
+    p.add_argument("--inbox",     default=os.environ.get("INBOX_DIR", "/inbox"),
+                   help="Directory to watch for new audio files")
+    p.add_argument("--output",    default=os.environ.get("OUTPUT_DIR", "/output"),
+                   help="Directory for pipeline output")
+    p.add_argument("--processed", default=os.environ.get("PROCESSED_DIR", "/processed"),
+                   help="Directory for processed input files")
 
     # Processing
     p.add_argument("--workers",  type=int, default=2,   help="Number of parallel pipeline workers")
@@ -253,7 +297,11 @@ def main() -> None:
     p.add_argument("--profile-threshold", type=float, default=0.75)
     p.add_argument("--post-correct-model", default="gpt-4o-mini")
 
-    args = p.parse_args()
+    return p
+
+
+def main() -> None:
+    args = build_parser().parse_args()
 
     inbox     = Path(args.inbox)
     output    = Path(args.output)
@@ -294,7 +342,7 @@ def main() -> None:
     else:
         # Polling fallback
         if not WATCHDOG_AVAILABLE:
-            log.info("watchdog not installed — using polling mode. "
+            log.info("watchdog not installed â using polling mode. "
                      "Install with: pip install watchdog")
         log.info("Polling inbox every %.1fs...", args.interval)
         try:
@@ -309,3 +357,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
