@@ -53,7 +53,10 @@ def _bootstrap():
         )
         print("\n  ✓ All packages installed. Starting pipeline...\n")
 
-_bootstrap()
+# Only auto-install when executed as a script. Importing the module (e.g. from
+# the test suite or another tool) must never trigger a pip install.
+if __name__ == "__main__":
+    _bootstrap()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION 1 — Standard imports (after bootstrap)
@@ -63,8 +66,10 @@ import argparse
 import difflib
 import json
 import logging
+import os
 import shutil
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -159,6 +164,30 @@ def studio_enhance(src: Path, dst: Path) -> Path:
     return dst
 
 
+def speech_intervals_from_silence(
+    silence_regions: list[tuple[float, float]],
+    total_dur: float,
+    pad: float = 0.15,
+) -> list[tuple[float, float]]:
+    """
+    Build speech intervals (the inverse of silence regions) with padding
+    around each speech burst. Silence that starts at t=0 has no speech
+    before it, so no interval is emitted there.
+    """
+    speech: list[tuple[float, float]] = []
+    cursor = 0.0
+    for s_start, s_end in silence_regions:
+        if s_start > 0.0:
+            seg_start = max(0.0, cursor - pad)
+            seg_end   = s_start + pad
+            if seg_end > seg_start + 0.05:
+                speech.append((seg_start, seg_end))
+        cursor = s_end
+    if cursor < total_dur:
+        speech.append((max(0.0, cursor - pad), total_dur))
+    return speech
+
+
 def vad_trim(src: Path, dst: Path,
              noise_db: float = -30.0, min_silence: float = 0.5,
              pad: float = 0.15) -> Path:
@@ -178,15 +207,12 @@ def vad_trim(src: Path, dst: Path,
     total  = (int(dur_m.group(1)) * 3600 + int(dur_m.group(2)) * 60
               + float(dur_m.group(3))) if dur_m else 99999.0
 
-    speech = []
-    cursor = 0.0
+    silence_regions = []
     for i, ss in enumerate(starts):
         se = ends[i] if i < len(ends) else total
-        if ss + pad > cursor - pad + 0.05:
-            speech.append((max(0.0, cursor - pad), ss + pad))
-        cursor = se
-    if cursor < total:
-        speech.append((max(0.0, cursor - pad), total))
+        silence_regions.append((ss, se))
+
+    speech = speech_intervals_from_silence(silence_regions, total, pad)
 
     if not speech:
         shutil.copy(str(src), str(dst))
@@ -245,16 +271,68 @@ def auto_device() -> tuple[str, str]:
 
 
 def stitch_chunks(base: list[dict], append: list[dict], overlap_sec: float) -> list[dict]:
-    if not base:   return append
-    if not append: return base
-    n = int(overlap_sec * 3)
-    s1 = [s["text"].strip() for s in base[-n:]]
-    s2 = [s["text"].strip() for s in append[:n]]
-    m  = difflib.SequenceMatcher(None, s1, s2).find_longest_match(0, len(s1), 0, len(s2))
-    if m.size > 0:
-        cut1 = len(base) - len(s1) + m.a + m.size
-        cut2 = m.b + m.size
-        return base[:cut1] + append[cut2:]
+    """
+    Merge two overlapping transcript segment lists using SequenceMatcher.
+
+    Chunk N+1 starts `overlap_sec` seconds before chunk N ends, so base
+    segments that end after the next chunk's start time may be re-transcribed
+    at the head of `append`. Candidate windows are therefore selected by
+    timestamp, not by segment count, so base segments outside the duplicated
+    audio can never be silently dropped.
+
+    If no common token run is found, both sides are kept — a duplicated
+    phrase is preferable to data loss.
+    """
+    if not base:
+        return append
+    if not append:
+        return base
+
+    # Start time of the appended chunk == start of the duplicated audio zone
+    try:
+        chunk_start = float(append[0]["start"])
+    except (KeyError, TypeError, ValueError):
+        chunk_start = 0.0
+    zone_end = chunk_start + overlap_sec
+
+    # Cap candidate list sizes for performance (~3 segments/sec heuristic)
+    overlap_words = max(1, int(overlap_sec * 3))
+
+    # Base candidates: segments that end after the next chunk starts
+    base_idx = [i for i, seg in enumerate(base) if seg["end"] > chunk_start]
+    base_idx = base_idx[-overlap_words:]
+
+    # Append candidates: head segments that start inside the duplicated zone
+    # (small tolerance for Whisper timestamp jitter)
+    app_idx = [i for i, seg in enumerate(append)
+               if float(seg.get("start", 0.0)) < zone_end + 1.0]
+    app_idx = app_idx[:overlap_words * 2]
+
+    if base_idx and app_idx:
+        slice1 = [base[i]["text"].strip() for i in base_idx]
+        slice2 = [append[i]["text"].strip() for i in app_idx]
+
+        matcher = difflib.SequenceMatcher(None, slice1, slice2)
+        match   = matcher.find_longest_match(0, len(slice1), 0, len(slice2))
+
+        if match.size > 0:
+            if match.a + match.size == len(slice1):
+                # The matched run reaches the end of the base window, i.e.
+                # it is the tail of the old chunk re-transcribed at the head
+                # of the new one. Splice there: base keeps everything up to
+                # and including the run, append continues after its copy.
+                cut1 = base_idx[match.a + match.size - 1] + 1
+                cut2 = app_idx[match.b + match.size - 1] + 1
+                return base[:cut1] + append[cut2:]
+            # Match anchored mid-window (e.g. a repeated "you" or
+            # "thank you" earlier in the base). Splicing here would drop
+            # real segments after it — keep both sides instead.
+            log.warning(
+                "Ambiguous chunk overlap (matched run of %d ends mid-window) "
+                "— keeping both sides; transcript may contain a duplicated "
+                "phrase.", match.size,
+            )
+
     return base + append
 
 
@@ -288,8 +366,10 @@ def transcribe(wav: Path, args) -> list[dict]:
         end = min(cursor + args.chunk_sec, total)
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp_path = Path(tmp.name)
-        subprocess.run(["ffmpeg", "-y", "-i", str(wav),
-                        "-ss", str(cursor), "-t", str(end - cursor),
+        subprocess.run(["ffmpeg", "-y",
+                        "-ss", str(cursor),   # input seeking: no re-decode from t=0
+                        "-t", str(end - cursor),
+                        "-i", str(wav),
                         "-ar", "16000", "-ac", "1", str(tmp_path)],
                        capture_output=True)
         segs, _ = model.transcribe(str(tmp_path), vad_filter=True,
@@ -308,39 +388,79 @@ def transcribe(wav: Path, args) -> list[dict]:
 # SECTION 4 — Diarization
 # ══════════════════════════════════════════════════════════════════════════════
 
-def diarize_llm(segments: list[dict], client) -> list[dict]:
-    if client is None:
-        for i, s in enumerate(segments):
-            s["speaker"] = "SPEAKER_A" if i % 2 == 0 else "SPEAKER_B"
+def diarize_llm(segments: list[dict], client,
+                model: str = "gpt-4o-mini") -> list[dict]:
+    """
+    Assign SPEAKER_A / SPEAKER_B to each segment using LLM turn-taking analysis.
+    Falls back gracefully if the API is unavailable or the response is unusable.
+    """
+
+    def _fallback_alternating() -> list[dict]:
+        for i, seg in enumerate(segments):
+            seg["speaker"] = "SPEAKER_A" if i % 2 == 0 else "SPEAKER_B"
         return segments
 
-    log.info("Running LLM diarization...")
+    if not OPENAI_AVAILABLE or client is None:
+        log.warning("OpenAI not available - assigning alternating speakers.")
+        return _fallback_alternating()
+
+    log.info("Running LLM diarization (model=%s)...", model)
     lines = [f"[{i}] [{s['start']:.1f}s–{s['end']:.1f}s] {s['text']}"
              for i, s in enumerate(segments)]
+    transcript_text = "\n".join(lines)
+
+    system_prompt = (
+        "You are an expert phone call analyst. You receive a numbered, timestamped "
+        "transcript of a two-person phone call. Assign each segment to SPEAKER_A or "
+        "SPEAKER_B based on conversational turn-taking, content context, and natural "
+        "dialogue flow.\n\n"
+        "Rules:\n"
+        "- Speakers alternate in a phone call; use natural turn-taking as the primary signal.\n"
+        "- Short affirmations ('Yes', 'OK', 'Mhmm') are typically the listening speaker.\n"
+        "- Longer explanatory segments are typically the main speaker.\n"
+        "- Return ONLY a JSON object of the form: "
+        '{"assignments": [{"index": 0, "speaker": "SPEAKER_A"}, ...]}\n'
+        "- Include every segment index. No extra text."
+    )
+
     try:
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
+        response = client.chat.completions.create(
+            model=model,
             messages=[
-                {"role": "system", "content": (
-                    "Assign each segment to SPEAKER_A or SPEAKER_B based on "
-                    "turn-taking. Return ONLY JSON: "
-                    '[{"index":0,"speaker":"SPEAKER_A"},...]'
-                )},
-                {"role": "user", "content": "\n".join(lines)},
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": transcript_text},
             ],
             temperature=0.1,
             response_format={"type": "json_object"},
         )
-        data = json.loads(resp.choices[0].message.content)
-        items = data if isinstance(data, list) else data.get("assignments", [])
-        lmap  = {x["index"]: x["speaker"] for x in items}
-        for i, s in enumerate(segments):
-            s["speaker"] = lmap.get(i, "SPEAKER_A")
+        raw = response.choices[0].message.content
+        data = json.loads(raw)
+        # Accept both {"assignments": [...]} and a bare [...]
+        assignments = data if isinstance(data, list) else data.get("assignments", [])
+        label_map: dict[int, str] = {}
+        for item in assignments:
+            try:
+                idx = int(item["index"])
+                spk = str(item["speaker"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if 0 <= idx < len(segments):
+                label_map[idx] = spk
+        # Guard against garbled or partial responses: require majority coverage
+        # before trusting LLM labels. Without this, a malformed response would
+        # default every unmatched segment to SPEAKER_A silently.
+        if len(label_map) >= max(1, len(segments) // 2):
+            for i, seg in enumerate(segments):
+                seg["speaker"] = label_map.get(i, "SPEAKER_A" if i % 2 == 0 else "SPEAKER_B")
+            return segments
+        log.warning(
+            "LLM diarization returned usable labels for only %d/%d segments - "
+            "falling back to alternating.", len(label_map), len(segments),
+        )
     except Exception as e:
-        log.warning("LLM diarization failed (%s) — using alternating fallback.", e)
-        for i, s in enumerate(segments):
-            s["speaker"] = "SPEAKER_A" if i % 2 == 0 else "SPEAKER_B"
-    return segments
+        log.warning("LLM diarization error (%s) - falling back to alternating.", e)
+
+    return _fallback_alternating()
 
 
 def diarize_pyannote(wav: Path, hf_token: str) -> list[dict]:
@@ -561,18 +681,19 @@ def merge_intervals(ivs: list[tuple], gap: float = 0.3) -> list[tuple]:
 
 
 def split_speakers(wav: Path, segs: list[dict], out_dir: Path,
-                   keep_timing: bool, fmt: str) -> dict[str, Path]:
+                   keep_timing: bool, fmt: str, stem: str = "") -> dict[str, Path]:
     by_spk: dict[str, list] = {}
     for s in segs:
         by_spk.setdefault(s.get("speaker", "SPEAKER_A"), []).append(
             (s["start"], s["end"]))
 
     files: dict[str, Path] = {}
+    prefix = f"{stem}_" if stem else ""
     for spk, ivs in by_spk.items():
         ivs     = merge_intervals(ivs)
         safe    = spk.lower().replace(" ", "_").replace("/", "_")
-        out_wav = out_dir / f"speaker_{safe}.wav"
-        out_f   = out_dir / f"speaker_{safe}.{fmt}"
+        out_wav = out_dir / f"{prefix}speaker_{safe}.wav"
+        out_f   = out_dir / f"{prefix}speaker_{safe}.{fmt}"
 
         if keep_timing:
             total = audio_duration(wav)
@@ -627,6 +748,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
 
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
+    stem = inp.stem
 
     # OpenAI client
     client = None
@@ -660,7 +782,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
         work = vad
 
     # Export clean MP3
-    clean = out / f"{inp.stem}_cleaned.mp3"
+    clean = out / f"{stem}_cleaned.mp3"
     export_mp3(work, clean)
     log.info("Clean MP3: %s", clean.name)
 
@@ -690,7 +812,7 @@ def run_pipeline(args: argparse.Namespace) -> None:
             turns = diarize_pyannote(work, args.hf_token)
             segs  = merge_diar(segs, turns)
         else:
-            segs = diarize_llm(segs, client)
+            segs = diarize_llm(segs, client, args.post_correct_model)
     else:
         log.info("━━ Step 5/7  Speaker labels present — skipping diarization")
 
@@ -722,8 +844,9 @@ def run_pipeline(args: argparse.Namespace) -> None:
     else:
         log.info("━━ Step 7/7  Skipping post-correction")
 
-    # Write outputs
-    transcript_path = out / "transcript.txt"
+    # Write outputs (stem-prefixed so consecutive runs into the same
+    # output directory do not overwrite each other's results)
+    transcript_path = out / f"{stem}_transcript.txt"
     with open(transcript_path, "w", encoding="utf-8") as f:
         cur = None
         for s in segs:
@@ -732,10 +855,11 @@ def run_pipeline(args: argparse.Namespace) -> None:
                 f.write(f"\n{spk}:\n"); cur = spk
             f.write(f"  [{s['start']:.1f}s – {s['end']:.1f}s] {s.get('text','').strip()}\n")
 
-    (out / "diarization.json").write_text(
+    (out / f"{stem}_diarization.json").write_text(
         json.dumps(segs, indent=2, ensure_ascii=False))
 
-    speaker_files = split_speakers(work, segs, out, args.keep_timing, args.format)
+    speaker_files = split_speakers(work, segs, out, args.keep_timing,
+                                   args.format, stem=stem)
 
     if not args.keep_wav:
         for f in [out/"raw.wav", out/"enhanced.wav", out/"vad.wav"]:
@@ -746,8 +870,8 @@ def run_pipeline(args: argparse.Namespace) -> None:
     print(f"  ✓  Pipeline complete in {elapsed:.1f}s")
     print(f"  📁 Output: {out}")
     print(f"  🎵 Clean MP3:   {clean.name}")
-    print("  📝 Transcript:  transcript.txt")
-    print("  📊 Diarization: diarization.json")
+    print(f"  📝 Transcript:  {stem}_transcript.txt")
+    print(f"  📊 Diarization: {stem}_diarization.json")
     for spk, p in speaker_files.items():
         print(f"  🎤 {spk}:  {p.name}")
     print("━"*60 + "\n")
@@ -756,6 +880,25 @@ def run_pipeline(args: argparse.Namespace) -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION 9 — Directory Watcher
 # ══════════════════════════════════════════════════════════════════════════════
+
+# In-flight registry: a file claimed here is being processed (or checked for
+# stability) by one worker; no other worker may touch it until it is released.
+_in_flight: set[str] = set()
+_in_flight_lock = threading.Lock()
+
+
+def _claim(name: str) -> bool:
+    with _in_flight_lock:
+        if name in _in_flight:
+            return False
+        _in_flight.add(name)
+        return True
+
+
+def _release(name: str) -> None:
+    with _in_flight_lock:
+        _in_flight.discard(name)
+
 
 def _is_stable(path: Path, wait: float = 1.0) -> bool:
     try:
@@ -796,12 +939,27 @@ def run_watcher(args: argparse.Namespace) -> None:
     executor = ThreadPoolExecutor(max_workers=args.workers)
 
     def handle(f: Path):
-        if not _is_stable(f): return
-        log.info("New file: %s", f.name)
-        ok = _process_one(f, args)
-        dest = processed / ("failed" if not ok else "") / f.name
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(f), str(dest))
+        # Exactly-once guarantee: the startup scan, the poll loop and the
+        # watchdog may all see the same file; only the first claim wins.
+        if not _claim(f.name):
+            return
+        try:
+            # Wait until the file stops changing (writers may still be
+            # copying when the filesystem event fires).
+            stable = False
+            for _ in range(3):
+                if _is_stable(f, wait=2.0):
+                    stable = True
+                    break
+            if not stable:
+                return
+            log.info("New file: %s", f.name)
+            ok = _process_one(f, args)
+            dest = processed / ("failed" if not ok else "") / f.name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(f), str(dest))
+        finally:
+            _release(f.name)
 
     # Process existing files first
     for f in sorted(inbox.iterdir()):
@@ -810,12 +968,21 @@ def run_watcher(args: argparse.Namespace) -> None:
 
     if WATCHDOG_AVAILABLE and not args.poll:
         class Handler(FileSystemEventHandler):
+            def _maybe_submit(self, path_str) -> None:
+                p = Path(path_str)
+                if p.suffix.lower() in AUDIO_EXTENSIONS:
+                    executor.submit(handle, p)
+
             def on_created(self, event):
                 if not event.is_directory:
-                    p = Path(event.src_path)
-                    if p.suffix.lower() in AUDIO_EXTENSIONS:
-                        time.sleep(2)
-                        executor.submit(handle, p)
+                    self._maybe_submit(event.src_path)
+
+            def on_moved(self, event):
+                # Files dropped into the inbox via rename (e.g. a browser
+                # writing a .part temp file and renaming it) arrive as
+                # move events, not create events.
+                if not event.is_directory:
+                    self._maybe_submit(getattr(event, "dest_path", event.src_path))
 
         obs = Observer()
         obs.schedule(Handler(), str(inbox), recursive=False)
@@ -1000,9 +1167,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ── watch ─────────────────────────────────────────────────────────────────
     watch = sub.add_parser("watch", help="Watch a folder for new audio files")
-    watch.add_argument("--inbox",      default="inbox")
-    watch.add_argument("--output-dir", default="output")
-    watch.add_argument("--processed",  default="processed")
+    # Env vars provide the defaults (same contract as watcher.py); explicit
+    # CLI flags always win.
+    watch.add_argument("--inbox",      default=os.environ.get("INBOX_DIR", "inbox"))
+    watch.add_argument("--output-dir", default=os.environ.get("OUTPUT_DIR", "output"))
+    watch.add_argument("--processed",  default=os.environ.get("PROCESSED_DIR", "processed"))
     watch.add_argument("--workers",    type=int, default=2)
     watch.add_argument("--poll",       action="store_true")
     watch.add_argument("--poll-interval", type=float, default=5.0, dest="poll_interval")
