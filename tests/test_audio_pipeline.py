@@ -24,10 +24,12 @@ def test_stitch_chunks_empty_base():
     append = [{"start": 0, "end": 2, "text": "hello"}]
     assert stitch_chunks([], append, 1.0) == append
 
+
 def test_stitch_chunks_empty_append():
     """Passing an empty append returns base unchanged."""
     base = [{"start": 0, "end": 2, "text": "hello"}]
     assert stitch_chunks(base, [], 1.0) == base
+
 
 def test_stitch_chunks_overlap_deduplication():
     """
@@ -51,6 +53,7 @@ def test_stitch_chunks_overlap_deduplication():
     texts = [seg["text"] for seg in result]
     assert texts == ["this", "is", "a", "test", "of", "stitching"]
 
+
 def test_stitch_chunks_no_overlap():
     """When there is no common token run, the chunks are simply concatenated."""
     base   = [{"start": 0, "end": 1, "text": "alpha"}]
@@ -58,6 +61,7 @@ def test_stitch_chunks_no_overlap():
     result = stitch_chunks(base, append, overlap_sec=1.0)
     texts  = [seg["text"] for seg in result]
     assert texts == ["alpha", "beta"]
+
 
 def test_stitch_chunks_exact_overlap_window():
     """
@@ -100,6 +104,7 @@ def test_stitch_chunks_dedup_real_chunk_boundary():
     texts  = [seg["text"] for seg in result]
     assert texts == ["hello there", "you", "bye", "next topic"]
 
+
 def test_stitch_chunks_no_data_loss_on_ambiguous_repetition():
     """
     Regression: a repeated token early in the base overlap window must not
@@ -123,6 +128,7 @@ def test_stitch_chunks_no_data_loss_on_ambiguous_repetition():
     # Nothing from the base may disappear.
     for seg in base:
         assert seg["text"] in texts
+
 
 def test_stitch_chunks_base_outside_zone_never_cut():
     """
@@ -148,6 +154,7 @@ def test_speech_intervals_basic():
     result  = speech_intervals_from_silence(silence, total_dur=180.0, pad=0.15)
     assert result == [(0.0, 10.15), (14.85, 30.15), (33.85, 180.0)]
 
+
 def test_speech_intervals_leading_silence():
     """
     Regression: silence at t=0 has no speech before it — the old code kept
@@ -158,6 +165,7 @@ def test_speech_intervals_leading_silence():
     assert result[0] == (11.85, 60.15)
     assert all(start > 0.0 for start, _ in result[:1])
     assert result == [(11.85, 60.15), (64.85, 180.0)]
+
 
 def test_speech_intervals_no_silence():
     result = speech_intervals_from_silence([], total_dur=120.0, pad=0.15)
@@ -178,6 +186,7 @@ class _FakeCompletions:
         message = types.SimpleNamespace(content=content)
         return types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
 
+
 class _FakeClient:
     def __init__(self, payload=None, raise_exc=None):
         self.payload   = payload
@@ -185,15 +194,18 @@ class _FakeClient:
         self.calls     = []
         self.chat = types.SimpleNamespace(completions=_FakeCompletions(self))
 
+
 def _segments(n=6):
     return [{"start": float(i), "end": float(i) + 1, "text": f"seg {i}"}
             for i in range(n)]
+
 
 def test_diarize_llm_no_client_falls_back(monkeypatch):
     monkeypatch.setattr(AudioPipeline, "OPENAI_AVAILABLE", True)
     segs = _segments()
     out  = diarize_llm(segs, None, "test-model")
     assert [s["speaker"] for s in out] == ["SPEAKER_A", "SPEAKER_B"] * 3
+
 
 def test_diarize_llm_valid_response(monkeypatch):
     monkeypatch.setattr(AudioPipeline, "OPENAI_AVAILABLE", True)
@@ -206,6 +218,7 @@ def test_diarize_llm_valid_response(monkeypatch):
     out    = diarize_llm(segs, client, "test-model")
     assert [s["speaker"] for s in out] == ["SPEAKER_A", "SPEAKER_B"] * 3
 
+
 def test_diarize_llm_garbled_response_falls_back(monkeypatch):
     """A non-JSON response must fall back to alternating, not SPEAKER_A-everything."""
     monkeypatch.setattr(AudioPipeline, "OPENAI_AVAILABLE", True)
@@ -213,6 +226,7 @@ def test_diarize_llm_garbled_response_falls_back(monkeypatch):
     segs   = _segments()
     out    = diarize_llm(segs, client, "test-model")
     assert [s["speaker"] for s in out] == ["SPEAKER_A", "SPEAKER_B"] * 3
+
 
 def test_diarize_llm_low_coverage_falls_back(monkeypatch):
     """Labels for a small minority of segments must not be trusted."""
@@ -222,6 +236,7 @@ def test_diarize_llm_low_coverage_falls_back(monkeypatch):
     segs   = _segments(6)
     out    = diarize_llm(segs, client, "test-model")
     assert [s["speaker"] for s in out] == ["SPEAKER_A", "SPEAKER_B"] * 3
+
 
 def test_diarize_llm_uses_model_param(monkeypatch):
     """--post-correct-model must be honoured for diarization too."""
@@ -233,6 +248,7 @@ def test_diarize_llm_uses_model_param(monkeypatch):
     client = _FakeClient(payload=payload)
     diarize_llm(_segments(), client, "my-custom-model")
     assert client.calls[0]["model"] == "my-custom-model"
+
 
 def test_diarize_llm_out_of_range_indices_ignored(monkeypatch):
     monkeypatch.setattr(AudioPipeline, "OPENAI_AVAILABLE", True)
@@ -258,6 +274,7 @@ def test_build_parser_process_defaults():
     assert args.output_dir == "output"
     assert args.format == "mp3"
 
+
 def test_build_parser_watch_env_defaults(monkeypatch):
     monkeypatch.setenv("INBOX_DIR", "/env/inbox")
     monkeypatch.setenv("OUTPUT_DIR", "/env/output")
@@ -267,12 +284,14 @@ def test_build_parser_watch_env_defaults(monkeypatch):
     assert args.output_dir == "/env/output"
     assert args.processed == "/env/processed"
 
+
 def test_build_parser_watch_flags_override_env(monkeypatch):
     monkeypatch.setenv("INBOX_DIR", "/env/inbox")
     args = build_parser().parse_args(
         ["watch", "--inbox", "/flag/inbox", "--studio"])
     assert args.inbox == "/flag/inbox"
     assert args.studio is True
+
 
 def test_build_parser_watch_defaults_without_env(monkeypatch):
     for var in ("INBOX_DIR", "OUTPUT_DIR", "PROCESSED_DIR"):
@@ -297,6 +316,7 @@ def test_claim_release_exclusive():
     _release("file1.amr")
     _release("file2.amr")
     assert not _in_flight
+
 
 def test_release_unknown_name_is_noop():
     _in_flight.clear()
