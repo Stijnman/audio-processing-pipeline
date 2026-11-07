@@ -384,9 +384,9 @@ def diarize_llm(segments: list[dict], openai_client) -> list[dict]:
     Falls back gracefully if the API is unavailable.
     """
     if not OPENAI_AVAILABLE or openai_client is None:
-        log.warning("OpenAI not available — assigning alternating speakers.")
+        log.warning("OpenAI not available — marking speakers UNKNOWN.")
         for i, seg in enumerate(segments):
-            seg["speaker"] = "SPEAKER_A" if i % 2 == 0 else "SPEAKER_B"
+            seg["speaker"] = "UNKNOWN"
         return segments
 
     log.info("Running LLM diarization...")
@@ -424,11 +424,11 @@ def diarize_llm(segments: list[dict], openai_client) -> list[dict]:
         assignments = data if isinstance(data, list) else data.get("assignments", [])
         label_map = {item["index"]: item["speaker"] for item in assignments}
         for i, seg in enumerate(segments):
-            seg["speaker"] = label_map.get(i, "SPEAKER_A")
+            seg["speaker"] = label_map.get(i, "UNKNOWN")
     except Exception as e:
-        log.warning("LLM diarization error (%s) — falling back to alternating.", e)
+        log.warning("LLM diarization error (%s) — marking speakers UNKNOWN.", e)
         for i, seg in enumerate(segments):
-            seg["speaker"] = "SPEAKER_A" if i % 2 == 0 else "SPEAKER_B"
+            seg["speaker"] = "UNKNOWN"
 
     return segments
 
@@ -472,7 +472,7 @@ def merge_transcript_with_diarization(transcript: list[dict],
     for seg in transcript:
         seg_start = seg["start"]
         seg_end   = seg["end"]
-        best_speaker = "SPEAKER_00"
+        best_speaker = "UNKNOWN"
         best_overlap = 0.0
         for turn in diar_turns:
             overlap = min(seg_end, turn["end"]) - max(seg_start, turn["start"])
