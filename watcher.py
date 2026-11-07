@@ -6,7 +6,7 @@ Zero-touch directory watcher for the audio processing pipeline.
 
 Monitors an /inbox directory for new audio files. The moment a file
 lands, it is automatically processed by advanced_pipeline.py and the
-results are written to /output. Processed files are moved to /processed.
+results are written to /output. Copies of processed files are archived to /processed; originals remain untouched.
 
 Supports both polling mode (no extra deps) and inotify/FSEvents mode
 (via watchdog, much more efficient on large directories).
@@ -116,21 +116,34 @@ def process_file(audio_path: Path, args: argparse.Namespace) -> bool:
         return False
 
 
+def is_archived(src: Path, archive_dir: Path) -> bool:
+    """Check whether an identical source version was already archived."""
+    try:
+        source_stat = src.stat()
+        for folder in (archive_dir, archive_dir / "failed"):
+            for archived in folder.glob(f"{src.stem}*{src.suffix}"):
+                archived_stat = archived.stat()
+                if (archived_stat.st_size == source_stat.st_size
+                        and archived_stat.st_mtime_ns == source_stat.st_mtime_ns):
+                    return True
+    except OSError:
+        return False
+    return False
+
+
 def move_file(src: Path, dest_dir: Path, success: bool) -> None:
-    """Move a processed file to the processed or failed directory."""
+    """Archive a COPY of the source. Never move or delete the original."""
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / src.name
-    # Avoid overwriting if a file with the same name already exists
     if dest.exists():
-        stem   = src.stem
-        suffix = src.suffix
+        stem, suffix = src.stem, src.suffix
         i = 1
         while dest.exists():
             dest = dest_dir / f"{stem}_{i}{suffix}"
             i += 1
-    shutil.move(str(src), str(dest))
+    shutil.copy2(str(src), str(dest))
     status = "processed" if success else "failed"
-    log.info("Moved to %s: %s", status, dest.name)
+    log.info("Copied to %s (original preserved): %s", status, dest.name)
 
 
 def scan_and_process(inbox: Path, args: argparse.Namespace,
@@ -139,6 +152,8 @@ def scan_and_process(inbox: Path, args: argparse.Namespace,
     futures = {}
     for f in sorted(inbox.iterdir()):
         if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS:
+            if is_archived(f, Path(args.processed)):
+                continue
             # Skip files that are still being written (size stable check)
             if not is_file_stable(f):
                 log.debug("Skipping unstable file: %s", f.name)
@@ -193,7 +208,7 @@ class AudioFileHandler(FileSystemEventHandler if WATCHDOG_AVAILABLE else object)
         path = Path(event.src_path)
         if path.suffix.lower() not in AUDIO_EXTENSIONS:
             return
-        if str(path) in self._pending:
+        if str(path) in self._pending or is_archived(path, Path(self.args.processed)):
             return
         self._pending.add(str(path))
         log.info("New file detected: %s", path.name)
