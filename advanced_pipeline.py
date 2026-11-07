@@ -680,7 +680,9 @@ def apply_voice_profiling(segments: list[dict], wav_path: Path,
     # Aggregate segments by speaker label
     speaker_segments: dict[str, list[dict]] = {}
     for seg in segments:
-        spk = seg.get("speaker", "SPEAKER_A")
+        spk = seg.get("speaker", "UNKNOWN")
+        if spk == "UNKNOWN":
+            continue  # Never enroll or identify an unverified speaker label.
         speaker_segments.setdefault(spk, []).append(seg)
 
     speaker_name_map: dict[str, str] = {}
@@ -716,7 +718,7 @@ def apply_voice_profiling(segments: list[dict], wav_path: Path,
 
     # Apply name map to segments
     for seg in segments:
-        spk = seg.get("speaker", "SPEAKER_A")
+        spk = seg.get("speaker", "UNKNOWN")
         seg["speaker"] = speaker_name_map.get(spk, spk)
 
     return segments
@@ -867,7 +869,7 @@ def split_audio_by_speaker(wav_path: Path, segments: list[dict],
     # Group intervals by speaker
     speaker_intervals: dict[str, list[tuple[float, float]]] = {}
     for seg in segments:
-        spk = seg.get("speaker", "SPEAKER_A")
+        spk = seg.get("speaker", "UNKNOWN")
         speaker_intervals.setdefault(spk, []).append((seg["start"], seg["end"]))
 
     output_files: dict[str, Path] = {}
@@ -970,7 +972,7 @@ def write_transcript(segments: list[dict], output_path: Path) -> None:
     with open(output_path, "w", encoding="utf-8") as f:
         current_speaker = None
         for seg in segments:
-            spk  = seg.get("speaker", "SPEAKER_A")
+            spk  = seg.get("speaker", "UNKNOWN")
             text = seg.get("text", "").strip()
             ts   = f"[{seg['start']:.1f}s – {seg['end']:.1f}s]"
             if spk != current_speaker:
