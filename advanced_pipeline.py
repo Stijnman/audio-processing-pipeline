@@ -870,6 +870,8 @@ def split_audio_by_speaker(wav_path: Path, segments: list[dict],
     speaker_intervals: dict[str, list[tuple[float, float]]] = {}
     for seg in segments:
         spk = seg.get("speaker", "UNKNOWN")
+        if spk == "UNKNOWN":
+            continue  # Do not combine unverified speakers into one exported identity track.
         speaker_intervals.setdefault(spk, []).append((seg["start"], seg["end"]))
 
     output_files: dict[str, Path] = {}
